@@ -50,8 +50,18 @@ public class CameraService extends Service {
     final Deque<Long> attempts = new ArrayDeque<>();
     final SecureRandom random = new SecureRandom();
     String id;
+    TrustedClients trusted;
+    final Map<String,String> owners=new ConcurrentHashMap<>();
+    synchronized void forgetClient(String client){trusted.remove(client);owners.entrySet().removeIf(e->{if(e.getValue().equals(client)){tokens.remove(e.getKey());return true;}return false;});}
+    synchronized JSONObject session(String owner)throws Exception {
+        long now=System.currentTimeMillis();tokens.entrySet().removeIf(e->e.getValue()<now);owners.keySet().retainAll(tokens.keySet());
+        if(!owner.isEmpty())owners.entrySet().removeIf(e->{if(owner.equals(e.getValue())){tokens.remove(e.getKey());return true;}return false;});
+        if(tokens.size()>=4)throw new IllegalStateException("Maximum four paired sessions");
+        byte[] bytes=new byte[32];random.nextBytes(bytes);String token=hex(bytes);tokens.put(token,now+8*3600000L);if(!owner.isEmpty())owners.put(token,owner);
+        return new JSONObject().put("token",token).put("expiresIn",28800).put("name",name()).put("id",id).put("trustedId",owner);
+    }
     private String name() { return getSharedPreferences("deck", 0).getString("name", Build.MODEL); }
-    void revoke() { tokens.clear(); rotatePin(); }
+    void revoke() { tokens.clear(); owners.clear();if(trusted!=null)trusted.clear();rotatePin(); }
     void rotatePin() { pin = String.format(Locale.US, "%04d", random.nextInt(10000)); pinExpires = System.currentTimeMillis() + 300_000; }
 
     synchronized void updatePower() {
@@ -86,7 +96,7 @@ public class CameraService extends Service {
         try {
             id = getSharedPreferences("deck", 0).getString("id", "");
             if (id.isEmpty()) { id = UUID.randomUUID().toString(); getSharedPreferences("deck", 0).edit().putString("id", id).apply(); }
-            rotatePin(); audio=new AudioEngine(this); engine = new CameraEngine(this,audio);
+            trusted=new TrustedClients(this);rotatePin(); audio=new AudioEngine(this); engine = new CameraEngine(this,audio);
             api = new Api(tls()); api.start(NanoHTTPD.SOCKET_READ_TIMEOUT, true);
             running = true;
             discovery = new DatagramSocket(DISCOVERY);
@@ -156,6 +166,11 @@ public class CameraService extends Service {
                 InetAddress remote = InetAddress.getByName(s.getRemoteIpAddress());
                 if (!remote.isSiteLocalAddress() && !remote.isLinkLocalAddress()) return error(Response.Status.FORBIDDEN, "Local network only");
                 String uri = s.getUri();
+                if(uri.equals("/resume")&&s.getMethod()==Method.POST){
+                    String owner=trusted.authenticate(body(s).optString("rememberToken"));
+                    if(owner==null)return error(Response.Status.UNAUTHORIZED,"Доверие отозвано. Подключитесь с PIN.");
+                    return json(Response.Status.OK,session(owner));
+                }
                 if (uri.equals("/pair") && s.getMethod() == Method.POST) {
                     synchronized (attempts) {
                         long now = System.currentTimeMillis();
@@ -163,18 +178,41 @@ public class CameraService extends Service {
                         if (attempts.size() >= 5) return error(Response.Status.FORBIDDEN, "Too many attempts; wait one minute");
                         attempts.addLast(now);
                         if (now > pinExpires) { rotatePin(); return error(Response.Status.FORBIDDEN, "PIN expired; read the new PIN on phone"); }
-                        if (!MessageDigest.isEqual(pin.getBytes(), body(s).optString("pin").getBytes())) return error(Response.Status.FORBIDDEN, "Wrong PIN");
-                        byte[] bytes = new byte[32]; random.nextBytes(bytes); String token = hex(bytes);
-                        tokens.entrySet().removeIf(e -> e.getValue() < now);
-                        if (tokens.size() >= 4) return error(Response.Status.FORBIDDEN, "Maximum four paired sessions; revoke on phone");
-                        tokens.put(token, now + 8*3600000L); rotatePin();
-                        return json(Response.Status.OK, new JSONObject().put("token", token).put("expiresIn", 28800).put("name", name()));
+                        JSONObject pairing=body(s);
+                        if (!MessageDigest.isEqual(pin.getBytes(), pairing.optString("pin").getBytes())) return error(Response.Status.FORBIDDEN, "Wrong PIN");
+                        JSONObject remembered=pairing.optBoolean("remember",false)?trusted.add(pairing.optString("clientName","Windows")):new JSONObject();
+                        JSONObject result;
+                        try{result=session(remembered.optString("trustedId"));}catch(Exception e){if(remembered.has("trustedId"))trusted.remove(remembered.getString("trustedId"));throw e;}
+                        if(remembered.has("rememberToken"))result.put("rememberToken",remembered.getString("rememberToken"));
+                        rotatePin();return json(Response.Status.OK,result);
                     }
                 }
                 String auth = s.getHeaders().getOrDefault("authorization", "");
                 Long expires = auth.startsWith("Bearer ") ? tokens.get(auth.substring(7)) : null;
                 if (expires == null || expires < System.currentTimeMillis()) return error(Response.Status.UNAUTHORIZED, "Pair again on phone");
-                if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("previewBuild", BuildConfig.PREVIEW_BUILD));
+                if(uri.equals("/trusted")&&s.getMethod()==Method.GET)return json(Response.Status.OK,new JSONObject().put("clients",trusted.list()));
+                if(uri.equals("/forget")&&s.getMethod()==Method.POST){String owner=owners.get(auth.substring(7));if(owner!=null)forgetClient(owner);return json(Response.Status.OK,new JSONObject().put("accepted",true));}
+                if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("previewBuild", BuildConfig.PREVIEW_BUILD).put("auroraUpdates",BuildConfig.PREVIEW_BUILD));
+                if(s.getMethod()==Method.GET&&uri.equals("/video")){
+                    if(viewers.incrementAndGet()>2){viewers.decrementAndGet();return error(Response.Status.SERVICE_UNAVAILABLE,"Слишком много просмотров");}
+                    final LiveVideo video;try{video=engine.subscribeVideo();}catch(Exception e){viewers.decrementAndGet();return error(Response.Status.NOT_IMPLEMENTED,"H.264 недоступен: "+e.getMessage());}
+                    final String videoToken=auth.substring(7);final CameraEngine owner=engine;
+                    InputStream stream=new InputStream(){
+                        byte[] part=new byte[0];int offset;long previous=-1;boolean ended;
+                        public int read()throws IOException{byte[] b=new byte[1];return read(b,0,1)<0?-1:b[0]&255;}
+                        public int read(byte[] b,int off,int len)throws IOException{
+                            if(len==0)return 0;
+                            while(offset==part.length){Long expiry=tokens.get(videoToken);if(ended||!running||owner.closed||video.closed||!video.error.isEmpty()||expiry==null||expiry<System.currentTimeMillis()){close();return -1;}
+                                owner.demandRemote();LiveVideo.Packet packet;try{packet=video.next(previous);}catch(InterruptedException e){Thread.currentThread().interrupt();close();return -1;}if(packet==null)continue;
+                                previous=packet.sequence();byte[] metadata;
+                                try{metadata=owner.trackingStatus().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);}catch(Exception e){metadata=new byte[]{123,125};}
+                                java.nio.ByteBuffer out=java.nio.ByteBuffer.allocate(24+metadata.length+packet.bytes().length);out.putInt(packet.bytes().length).putLong(packet.pts()).putInt(owner.rotation).putInt(packet.key()?1:0).putInt(metadata.length).put(metadata).put(packet.bytes());part=out.array();offset=0;
+                            }int n=Math.min(len,part.length-offset);System.arraycopy(part,offset,b,off,n);offset+=n;return n;
+                        }
+                        public void close(){if(!ended){ended=true;viewers.decrementAndGet();owner.unsubscribeVideo(video);updatePower();}}
+                    };
+                    Response response=newChunkedResponse(Response.Status.OK,"application/x-cameradeck-avc",stream);response.addHeader("Cache-Control","no-store");return response;
+                }
                 if(s.getMethod()==Method.GET&&uri.equals("/stream")){
                     if(viewers.incrementAndGet()>2){viewers.decrementAndGet();return error(Response.Status.SERVICE_UNAVAILABLE,"Слишком много просмотров");}
                     final String token=auth.substring(7);final CameraEngine camera=engine;
@@ -241,7 +279,6 @@ public class CameraService extends Service {
                     return newFixedLengthResponse(Response.Status.OK,mime, source, size);
                 }
                 if (s.getMethod() == Method.PUT && uri.equals("/update")) {
-                    if(BuildConfig.PREVIEW_BUILD)return error(Response.Status.CONFLICT,"Preview устанавливается отдельно. Обновления основного приложения сюда не устанавливаются.");
                     if (engine.recording || engine.busy || engine.photoPending) return error(Response.Status.CONFLICT, "Stop recording / wait for photo before update");
                     long length = Long.parseLong(s.getHeaders().getOrDefault("content-length", "0"));
                     if (length <= 0 || length > 200_000_000) return error(Response.Status.BAD_REQUEST, "APK too large");

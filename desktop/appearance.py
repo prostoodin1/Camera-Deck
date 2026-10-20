@@ -1,5 +1,5 @@
 """Camera Deck's minimal glass theme and viewfinder."""
-from PyQt6.QtCore import Qt,QRectF,QSize,QPoint
+from PyQt6.QtCore import QPointF, Qt,QRectF,QSize,QPoint
 from PyQt6.QtGui import QColor,QPainter,QPen,QFont
 from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider,QPushButton
 import math
@@ -100,9 +100,19 @@ def shutter_label(nanoseconds):
 class Viewfinder(QLabel):
     def __init__(self):
         super().__init__()
+        self.frame_rotation=0;self.on_focus=None;self.image_target=None
         self.backdrop=None;self.frame=None;self.telemetry={};self.message="ОЖИДАНИЕ ИЗОБРАЖЕНИЯ"
         self.setMinimumSize(240,200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+
+    def mousePressEvent(self,event):
+        target=self.image_target
+        if target is None or self.on_focus is None or not target.contains(event.position()):return super().mousePressEvent(event)
+        x=(event.position().x()-target.left())/target.width();y=(event.position().y()-target.top())/target.height()
+        if self.frame_rotation==90:x,y=y,1-x
+        elif self.frame_rotation==180:x,y=1-x,1-y
+        elif self.frame_rotation==270:x,y=1-y,x
+        self.on_focus(x,y)
 
     def sizeHint(self):return QSize(640,360)
 
@@ -129,7 +139,21 @@ class Viewfinder(QLabel):
             if self.backdrop is not None:
                 painter.drawImage(area,self.backdrop)
                 painter.fillRect(self.rect(),QColor(8,14,24,170))
-            painter.drawImage(target,self.frame)
+            painter.drawImage(target,self.frame);self.image_target=target
+            s=self.telemetry
+            def position(x,y):
+                if self.frame_rotation==90:x,y=1-y,x
+                elif self.frame_rotation==180:x,y=1-x,1-y
+                elif self.frame_rotation==270:x,y=y,1-x
+                return QPointF(target.left()+max(0,min(1,x))*target.width(),target.top()+max(0,min(1,y))*target.height())
+            painter.setPen(QPen(QColor("#84e6a4" if s.get('afState') in (2,4) else "#ffd76b"),1.5))
+            try:
+                for face in s.get('faces',[])[:20]:
+                    a=position(face['left'],face['top']);b=position(face['right'],face['bottom']);painter.drawRoundedRect(QRectF(a,b).normalized(),5,5)
+                    for eye in face.get('eyes',[])[:2]:painter.drawEllipse(position(*eye),4,4)
+                if s.get('focusPoint'):
+                    p=position(*s['focusPoint']);painter.drawRect(QRectF(p.x()-10,p.y()-10,20,20))
+            except (KeyError,ValueError,TypeError):pass
         else:
             painter.setPen(QColor("#767676"));painter.setFont(QFont("Segoe UI",10))
             painter.drawText(self.rect().adjusted(24,30,-24,-30),Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message)

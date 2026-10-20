@@ -150,12 +150,15 @@ class CameraClient:
         return json.loads(self.request(path, "POST" if body is not None else "GET",
                                        json.dumps(body).encode() if body is not None else None))
 
-    def pair(self, pin: str) -> dict:
+    def pair(self, pin: str, remember: bool = False) -> dict:
         if len(pin) != 4 or not pin.isascii() or not pin.isdigit():
             raise ValueError("PIN состоит из четырёх цифр")
-        result = self.json("/pair", {"pin": pin})
+        result = self.json("/pair", {"pin": pin,"remember":remember,"clientName":socket.gethostname()[:60]})
         self.token = result["token"]
         return result
+
+    def resume(self, secret):
+        result=self.json("/resume",{"rememberToken":secret});self.token=result["token"];return result
 
     def command(self, action: str, **kwargs) -> dict:
         return self.json("/command", {"action": action, **kwargs})

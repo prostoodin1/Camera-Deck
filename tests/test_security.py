@@ -22,7 +22,7 @@ def identity():
 
 
 def signed(identity, change=None):
-    data={"product":"camera-deck","version":"0.2.0","code":updates.VERSION_CODE+1,"protocol":1,
+    data={"product":updates.PRODUCT,"version":"0.2.0","code":updates.VERSION_CODE+1,"protocol":1,
           "windows":{"name":"CameraDeck.exe","size":3,"sha256":"a"*64},
           "android":{"name":"CameraDeck.apk","size":4,"sha256":"b"*64}}
     if change: change(data)

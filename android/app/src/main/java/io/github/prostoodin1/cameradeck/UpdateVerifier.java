@@ -13,10 +13,11 @@ import java.util.Arrays;
 
 final class UpdateVerifier {
     static JSONObject validateManifest(Context c, String envelope) throws Exception {
+        if(envelope.length()>65536)throw new SecurityException("Manifest too large");
         JSONObject signed = new JSONObject(envelope);
         byte[] payload = Base64.decode(signed.getString("payload"), Base64.NO_WRAP);
         String pem;
-        try (InputStream in = c.getAssets().open("update-public.pem"); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        try (InputStream in = c.getAssets().open(BuildConfig.PREVIEW_BUILD?"aurora-update-public.pem":"update-public.pem"); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[2048]; int n; while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
             pem = new String(out.toByteArray(), StandardCharsets.US_ASCII);
         }
@@ -25,7 +26,7 @@ final class UpdateVerifier {
         verifier.initVerify(KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(der))); verifier.update(payload);
         if (!verifier.verify(Base64.decode(signed.getString("signature"), Base64.NO_WRAP))) throw new SecurityException("Update signature invalid");
         JSONObject manifest = new JSONObject(new String(payload, StandardCharsets.UTF_8));
-        if (!manifest.getString("product").equals("camera-deck") || manifest.getInt("code") <= BuildConfig.VERSION_CODE || manifest.getInt("protocol") != 1) throw new SecurityException("Wrong product, protocol or old version");
+        if (!manifest.getString("product").equals(BuildConfig.PREVIEW_BUILD?"camera-deck-aurora":"camera-deck") || manifest.getInt("code") <= BuildConfig.VERSION_CODE || manifest.getInt("protocol") != 1) throw new SecurityException("Wrong product, protocol or old version");
         return manifest;
     }
     static void stage(Context c, String envelope, File apk) throws Exception {

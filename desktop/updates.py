@@ -15,8 +15,9 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.6.0"
-VERSION_CODE = 8
+VERSION = "0.7.0"
+VERSION_CODE = 9
+PRODUCT = "camera-deck-aurora"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CameraDeck"
@@ -90,10 +91,10 @@ def verify_envelope(envelope: bytes, public_key: bytes | None = None, current_co
     signed = json.loads(envelope)
     payload = base64.b64decode(signed["payload"], validate=True)
     signature = base64.b64decode(signed["signature"], validate=True)
-    key = serialization.load_pem_public_key(public_key or (ROOT / "update-public.pem").read_bytes())
+    key = serialization.load_pem_public_key(public_key or (ROOT / "aurora-update-public.pem").read_bytes())
     key.verify(signature, payload, padding.PKCS1v15(), hashes.SHA256())
     data = json.loads(payload)
-    if data.get("product") != "camera-deck" or data.get("protocol") != 1 or type(data.get("code")) is not int or data["code"] <= current_code:
+    if data.get("product") != PRODUCT or data.get("protocol") != 1 or type(data.get("code")) is not int or data["code"] <= current_code:
         raise ValueError("Wrong product, protocol or old update")
     if not re.fullmatch(r"\d+\.\d+\.\d+", data.get("version", "")):
         raise ValueError("Invalid version")
@@ -114,7 +115,7 @@ def check_updates() -> dict | None:
         raise ValueError("Too many releases")
     candidates = []
     for release in json.loads(raw):
-        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-v"):
+        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-aurora"):
             continue
         assets = {asset["name"]: asset for asset in release.get("assets", [])}
         manifest = assets.get("camera-deck-update.json")
