@@ -1,10 +1,12 @@
-# Camera Deck Aurora
+# Camera Deck · Prism
 
-Android phone cameras controlled from a Windows desk. Version **0.7.0 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
+Android phone cameras controlled from a Windows desk. Release **Prism**, version **0.7.1 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
+
+Prism names this release; Camera Deck is the application. Internal `.aurora` package, cryptographic channel identifiers and keys are retained so updates preserve installed apps, recordings and trusted clients. Future releases use their own names from `version.json`.
 
 ## Installation and first connection
 
-Install `CameraDeck-Aurora-Android.apk` over Aurora and run `CameraDeck-Aurora-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
+Install `CameraDeck-Prism-Android.apk` over Aurora and run `CameraDeck-Prism-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
 
 Connect both devices to the same Wi-Fi. On the phone press **Включить**, grant camera/microphone permissions, then open **Подключить**. On Windows choose the discovered phone, compare the entire SHA-256 fingerprint and enter its PIN. Manual local IP entry is available when broadcast discovery is blocked.
 

@@ -16,7 +16,7 @@ final class UpdateClient {
         URL url=new URL(value);
         for(int redirects=0;redirects<6;redirects++){
             String host=url.getHost();if(!url.getProtocol().equals("https")||!(host.equals("github.com")||host.equals("api.github.com")||host.endsWith(".githubusercontent.com")))throw new SecurityException("Недопустимый адрес обновления");
-            HttpsURLConnection c=(HttpsURLConnection)url.openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(15000);c.setReadTimeout(30000);c.setRequestProperty("User-Agent","CameraDeckAurora");
+            HttpsURLConnection c=(HttpsURLConnection)url.openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(15000);c.setReadTimeout(30000);c.setRequestProperty("User-Agent","CameraDeck");
             int code=c.getResponseCode();if(code>=300&&code<400){String location=c.getHeaderField("Location");c.disconnect();url=new URL(url,location);continue;}
             if(code!=200){c.disconnect();throw new IOException("GitHub HTTP "+code);}
             return new FilterInputStream(c.getInputStream()){@Override public void close()throws IOException{try{super.close();}finally{c.disconnect();}}};
@@ -37,7 +37,7 @@ final class UpdateClient {
                 JSONArray releases=new JSONArray(new String(read("https://api.github.com/repos/prostoodin1/Camera-Deck/releases?per_page=30",4_000_000),StandardCharsets.UTF_8));
                 JSONObject selected=null,asset=null;String envelope=null;int highest=BuildConfig.VERSION_CODE;
                 for(int i=0;i<releases.length();i++){
-                    JSONObject release=releases.getJSONObject(i);if(release.optBoolean("draft")||!release.optString("tag_name").startsWith(BuildConfig.PREVIEW_BUILD?"camera-deck-aurora":"camera-deck-v"))continue;
+                    JSONObject release=releases.getJSONObject(i);if(release.optBoolean("draft")||!release.optString("tag_name").startsWith(BuildConfig.PREVIEW_BUILD?"camera-deck-":"camera-deck-v"))continue;
                     JSONArray assets=release.getJSONArray("assets");JSONObject manifestAsset=null;for(int j=0;j<assets.length();j++)if(assets.getJSONObject(j).optString("name").equals("camera-deck-update.json"))manifestAsset=assets.getJSONObject(j);if(manifestAsset==null)continue;
                     try{
                         String signed=new String(read(manifestAsset.getString("browser_download_url"),65536),StandardCharsets.UTF_8);JSONObject manifest=UpdateVerifier.validateManifest(c,signed);if(manifest.getInt("code")<=highest)continue;

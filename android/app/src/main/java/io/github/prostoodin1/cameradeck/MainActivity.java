@@ -81,7 +81,7 @@ public class MainActivity extends Activity {
         center=text("Ваша камера. Ваш кадр.\nНажмите «Включить»",17,MUTED);center.setGravity(Gravity.CENTER);finder.addView(center,new FrameLayout.LayoutParams(-1,-1));
         trackingOverlay=new TrackingOverlay(this);finder.addView(trackingOverlay,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout top=column();top.setPadding(dp(16),dp(8),dp(16),dp(8));top.setBackground(panel(0xc0060606,0x22444444,22));
-        LinearLayout header=row();TextView brand=text("AURORA",16,YELLOW);brand.setLetterSpacing(.17f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout header=row();TextView brand=text("PRISM",16,YELLOW);brand.setLetterSpacing(.17f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
         start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(112),dp(44)));
         Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(116),dp(44));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
         connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setOnClickListener(v->pairingSettings());top.addView(connection);

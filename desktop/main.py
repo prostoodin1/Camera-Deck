@@ -405,7 +405,7 @@ class CameraTile(QWidget):
 class Window(QMainWindow):
     def __init__(self,auto_checks=True):
         super().__init__()
-        self.setWindowTitle("Camera Deck · Windows · " + updates.VERSION)
+        self.setWindowTitle("Camera Deck · " + updates.RELEASE_NAME)
         self.resize(1280, 820)
         self.setMinimumSize(960,620)
         self.tiles, self.jobs, self.devices = [], [], []
@@ -416,7 +416,7 @@ class Window(QMainWindow):
         self.setStyleSheet(THEME)
         root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(24,22,24,18);layout.setSpacing(16)
         brand=QHBoxLayout()
-        title = QLabel("Camera Deck Aurora"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
+        title = QLabel("Camera Deck Prism"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
         subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#a5a5a5");brand.addWidget(subtitle);brand.addStretch()
         self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#ffd76b");brand.addWidget(self.connection_count)
         self.devices_button=QPushButton("Устройства");self.devices_button.setCheckable(True);self.devices_button.setChecked(True)
@@ -448,7 +448,7 @@ class Window(QMainWindow):
         devices_menu=menu.addMenu("Устройства");devices_menu.addAction("Найти телефоны",self.scan_devices);devices_menu.addAction("Подключиться по IP",self.manual);devices_menu.addAction("Доверенные телефоны",self.trusted_devices)
         view_menu=menu.addMenu("Вид");view_menu.addAction("Показать / скрыть телефоны",lambda:self.devices_button.click())
         for n in range(1,4):view_menu.addAction(f"{n} колонка",lambda checked=False,n=n:self.columns.setCurrentIndex(n-1))
-        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True));system_menu.addAction("О программе",lambda:self.message("Camera Deck Aurora","H.264 через защищённое соединение · зум и композиция · доверенные устройства.\nЗапись сохраняется на телефоне в исходном качестве."))
+        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True));system_menu.addAction("О программе",lambda:self.message("Camera Deck Prism","H.264 через защищённое соединение · зум и композиция · доверенные устройства.\nЗапись сохраняется на телефоне в исходном качестве."))
         self.refresh_devices()
         self.empty = QLabel("<span style='font-size:34px;color:#f4f4f4'>Ваша камера. Больше возможностей.</span><br><br>"
             "Подключите Android-телефон любой марки<br><br>"

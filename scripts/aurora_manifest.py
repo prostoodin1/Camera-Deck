@@ -29,9 +29,9 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--init',action='store_true');parser.add_argument('folder',nargs='?',type=Path);args=parser.parse_args();private=key()
     if args.init:return
     if not args.folder:parser.error('folder is required')
-    version=json.loads((ROOT/'version.json').read_text());manifest=dict(product='camera-deck-aurora',version=version['version'],code=version['code'],protocol=1)
+    version=json.loads((ROOT/'version.json').read_text());manifest=dict(product='camera-deck-aurora',version=version['version'],code=version['code'],protocol=1,releaseName=version.get('releaseName','Aurora'))
     for platform,ext in [('windows','exe'),('android','apk')]:
-        path=args.folder/('CameraDeck-Aurora-'+('Windows' if platform=='windows' else 'Android')+'.'+ext)
+        path=args.folder/('CameraDeck-'+version.get('releaseName','Aurora')+'-'+('Windows' if platform=='windows' else 'Android')+'.'+ext)
         manifest[platform]=dict(name=path.name,size=path.stat().st_size,sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     payload=json.dumps(manifest,separators=(',',':'),sort_keys=True).encode();signature=private.sign(payload,padding.PKCS1v15(),hashes.SHA256())
     envelope=json.dumps(dict(payload=base64.b64encode(payload).decode(),signature=base64.b64encode(signature).decode())).encode()

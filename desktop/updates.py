@@ -15,8 +15,9 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.7.0"
-VERSION_CODE = 9
+VERSION = "0.7.1"
+VERSION_CODE = 10
+RELEASE_NAME = "Prism"
 PRODUCT = "camera-deck-aurora"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -115,7 +116,7 @@ def check_updates() -> dict | None:
         raise ValueError("Too many releases")
     candidates = []
     for release in json.loads(raw):
-        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-aurora"):
+        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-"):
             continue
         assets = {asset["name"]: asset for asset in release.get("assets", [])}
         manifest = assets.get("camera-deck-update.json")
