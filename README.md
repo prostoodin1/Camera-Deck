@@ -20,6 +20,8 @@ Reproduce with `python scripts/capture_demo.py`. The development simulator liste
 
 ## First connection
 
+CI also builds **Camera Deck Preview** (`-PcameraDeckPreview=true`) with a separate `.preview` package and provider authority. It installs alongside the released app, keeps its own recordings, and does not accept release APK updates. Stop the camera in the original app before starting Preview: they share the camera and LAN ports. Do not uninstall the original app or expect its recordings to appear in Preview. A signed in-place release update still requires the original APK and updater signing identities.
+
 1. Install `CameraDeck-Android-0.5.0.apk` on each phone. Open it, press **Включить** and grant camera and microphone access. Open **Подключить** for the name, PIN, IP and fingerprint. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission. The on-phone preview starts automatically after permission is granted; **Показывать камеру** pauses it when desired. **Объектив** selects cameras exposed by Android, including front-facing and external cameras.
 2. Run `CameraDeck-Windows-0.5.0.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
 3. Press **Найти телефоны**, select a device and **Подключить**. If discovery fails, enter the IPv4 address displayed by the phone using **По IP**. Guest Wi-Fi/client isolation and Windows Firewall can block discovery; use a Private network and allow Camera Deck only on that network. Do not expose the ports to the Internet.

@@ -1,5 +1,6 @@
 plugins { id 'com.android.application' }
 def releaseVersion = new groovy.json.JsonSlurper().parse(file('../../version.json'))
+def previewBuild = providers.gradleProperty('cameraDeckPreview').orNull == 'true'
 android {
     namespace 'io.github.prostoodin1.cameradeck'
     compileSdk 35
@@ -11,6 +12,8 @@ android {
         versionCode releaseVersion.code
         versionName releaseVersion.version
         buildConfigField 'int', 'PROTOCOL_VERSION', '1'
+        buildConfigField 'boolean', 'PREVIEW_BUILD', 'false'
+        manifestPlaceholders = [appLabel: 'Camera Deck']
     }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -24,7 +27,17 @@ android {
             }
         }
     }
-    buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false } }
+    buildTypes {
+        debug {
+            if (previewBuild) {
+                applicationIdSuffix '.preview'
+                versionNameSuffix '-preview'
+                buildConfigField 'boolean', 'PREVIEW_BUILD', 'true'
+                manifestPlaceholders = [appLabel: 'Camera Deck Preview']
+            }
+        }
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+    }
 }
 dependencies {
     implementation 'org.nanohttpd:nanohttpd:2.3.1'

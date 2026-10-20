@@ -174,7 +174,9 @@ class CameraTile(QWidget):
         self.listen.setEnabled(status.get("audioAvailable",False))
         self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  VIEW ≈640px")
         self.info.setToolTip(status.get("lastFile", ""))
-        if self.window.available:
+        if status.get("previewBuild"):
+            self.phone_update.setEnabled(False); self.phone_update.hide()
+        elif self.window.available:
             self.phone_update.setEnabled(self.window.available["code"] > status.get("versionCode", 0) and not recording)
             self.phone_update.setVisible(self.window.available["code"] > status.get("versionCode",0))
 

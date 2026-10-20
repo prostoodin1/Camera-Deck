@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
             v.setPadding(dp(9)+left,dp(6)+top,dp(9)+right,dp(6)+bottom);return insets;
         });
         LinearLayout header=row();LinearLayout brand=column();
-        TextView logo=text("Camera Deck",24,WHITE);logo.setTypeface(null,Typeface.BOLD);brand.addView(logo);
+        TextView logo=text(BuildConfig.PREVIEW_BUILD?"Camera Deck Preview":"Camera Deck",24,WHITE);logo.setTypeface(null,Typeface.BOLD);brand.addView(logo);
         TextView sub=text("Камера телефона · управление с компьютера",11,MUTED);brand.addView(sub);
         header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(104),dp(48)));root.addView(header);
         connection=text("Включите камеру — изображение и PIN появятся здесь",12,MUTED);
@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
         body.addView(text("ECO снижает нагрузку предпросмотра. Разрешение и FPS оригинала записи сохраняются. Экран можно выключить; остановка камеры доступна в уведомлении.",13,MUTED));
         body.addView(button("ПРОДОЛЖИТЬ В ФОНЕ",()->moveTaskToBack(true)));
         install=button("УСТАНОВИТЬ ОБНОВЛЕНИЕ",this::installUpdate);body.addView(install);
+        if(BuildConfig.PREVIEW_BUILD){install.setVisibility(View.GONE);body.addView(text("Preview установлена рядом с основным приложением. Записи между ними не переносятся. Перед подключением выключите камеру в основном приложении.",13,MUTED));}
         body.addView(text("Не удаляйте приложение для обновления: при удалении стираются записи. Сначала скачайте оригиналы через Windows. Для звука нужны разрешение микрофона и повторный запуск камеры.",12,MUTED));
         dialog().setTitle("ПИТАНИЕ / СИСТЕМА").setView(scroll(body)).setPositiveButton("ЗАКРЫТЬ",null).show();update();
     }

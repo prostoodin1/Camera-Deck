@@ -173,7 +173,7 @@ public class CameraService extends Service {
                 String auth = s.getHeaders().getOrDefault("authorization", "");
                 Long expires = auth.startsWith("Bearer ") ? tokens.get(auth.substring(7)) : null;
                 if (expires == null || expires < System.currentTimeMillis()) return error(Response.Status.UNAUTHORIZED, "Pair again on phone");
-                if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE));
+                if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("previewBuild", BuildConfig.PREVIEW_BUILD));
                 if (s.getMethod() == Method.GET && uri.equals("/frame")) {
                     engine.demandRemote(); updatePower();
                     byte[] bytes = engine.frame;
@@ -222,6 +222,7 @@ public class CameraService extends Service {
                     return newFixedLengthResponse(Response.Status.OK,mime, source, f.length());
                 }
                 if (s.getMethod() == Method.PUT && uri.equals("/update")) {
+                    if(BuildConfig.PREVIEW_BUILD)return error(Response.Status.CONFLICT,"Preview устанавливается отдельно. Обновления основного приложения сюда не устанавливаются.");
                     if (engine.recording || engine.busy || engine.photoPending) return error(Response.Status.CONFLICT, "Stop recording / wait for photo before update");
                     long length = Long.parseLong(s.getHeaders().getOrDefault("content-length", "0"));
                     if (length <= 0 || length > 200_000_000) return error(Response.Status.BAD_REQUEST, "APK too large");
