@@ -98,6 +98,22 @@ final class CameraEngine implements AutoCloseable {
     volatile String liveError="";
     String liveProfile="balanced";
     boolean liveRejected;
+    final Map<CameraCaptureSession,Runnable> afterSessionClosed=new IdentityHashMap<>();
+    void beginRecording(boolean canRetry)throws Exception{
+        recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
+        boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
+        try{recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);}
+        catch(Exception failure){
+            recordingTarget.close();recordingTarget=null;
+            if(!canRetry||live==null)throw failure;
+            LiveVideo retired=live;live=null;liveUsers=0;liveRejected=true;liveError="Для записи кодек переключён с H.264 просмотра на оригинал. Просмотр — JPEG.";
+            ready=false;busy=true;CameraCaptureSession previous=session;session=null;request=null;
+            Runnable retry=()->{retired.close();if(closed)return;try{beginRecording(false);}catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}};
+            if(previous!=null){afterSessionClosed.put(previous,retry);try{previous.stopRepeating();previous.abortCaptures();}catch(Exception ignored){}previous.close();}else retry.run();
+            return;
+        }
+        try{configure(true);}catch(Exception e){releaseRecorder();throw e;}
+    }
     synchronized LiveVideo subscribeVideo()throws Exception{
         FutureTask<LiveVideo> task=new FutureTask<>(()->{
             if(!ready||photoPending||busy)throw new IllegalStateException("Камера занята");
@@ -327,6 +343,7 @@ final class CameraEngine implements AutoCloseable {
                 if (closed) { s.close(); return; }
                 session = s;
                 try {
+                    if(liveRejected&&live!=null&&live.closed){LiveVideo failed=live;live=null;liveUsers=0;failed.close();}
                     if(!localRejected&&output!=localOutput){configure(video);return;}
                     nativePreview=output!=null&&output==localOutput;
                     request = camera.createCaptureRequest(video ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
@@ -359,7 +376,7 @@ final class CameraEngine implements AutoCloseable {
                     }
                 } catch(Exception e) { fail(e);busy=false; }
             }
-            public void onClosed(CameraCaptureSession s){if(output!=null&&retiredOutputs.remove(output))output.release();}
+            public void onClosed(CameraCaptureSession s){if(output!=null&&retiredOutputs.remove(output))output.release();Runnable next=afterSessionClosed.remove(s);if(next!=null)next.run();}
         }, handler);
     }
 
@@ -465,11 +482,7 @@ final class CameraEngine implements AutoCloseable {
                     if(sound && !audio.available())throw new IllegalStateException("Разрешите микрофон на телефоне или выключите звук в настройках");
                     if (exposure > 1_000_000_000L/videoFps) throw new IllegalArgumentException("Shutter is too long for selected FPS; shorten it or use Auto");
                     error="";
-                    recordingFile = nextFile("mp4");
-                    boolean realtime=characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)==CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
-                    recordingTarget=store.video(recordingFile.getName());
-                    try{recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);}catch(Exception e){recordingTarget.close();recordingTarget=null;throw e;}
-                    try { configure(true); } catch (Exception e) { releaseRecorder(); throw e; } break;
+                    beginRecording(true);break;
                 }
                 case "record_stop": {
                     if (!recording) throw new IllegalStateException("Not recording");
