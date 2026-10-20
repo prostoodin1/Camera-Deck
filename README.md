@@ -16,6 +16,10 @@ Actual desktop screenshots connected through pinned TLS to two local **camera si
 
 ![Exposure and focus](docs/screenshots/04-exposure-settings.png)
 
+![Compact ISO glass popover](docs/screenshots/06-iso-popover.png)
+
+![Separate fullscreen camera monitor](docs/screenshots/05-fullscreen-monitor.png)
+
 Reproduce with `python scripts/capture_demo.py`. The development simulator listens only on loopback and is not part of the installed app.
 
 ## First connection
@@ -38,7 +42,7 @@ CI also builds **Camera Deck Aurora** (`-PcameraDeckPreview=true`) with a separa
 - JPEG, PNG, WebP and capability-gated RAW DNG, with all normal and slower high-resolution photo sizes exposed by Camera2; no artificial 24-megapixel limit. Large PNG/WebP conversions may exceed available RAM; select JPEG/RAW or a smaller size in that case. PNG/WebP are converted from the processed JPEG: PNG does not restore lost JPEG information; WebP uses quality 95. DNG uses an actual RAW_SENSOR image and matching capture metadata. A failed RAW+preview combination reports an error and restores JPEG.
 - ISO + shutter applied together in manual mode, or automatic exposure; focus in dioptres or continuous autofocus. Controls report actual sensor exposure values. Unavailable capabilities are disabled or rejected by the phone.
 - Photos are unavailable while recording. Stop video before changing the camera or installing an update. Recording remains on the phone if the Windows desk disconnects; use the phone notification's Stop action to stop the service if needed.
-- **Материалы** lists up to 100 latest completed files and downloads selected originals to a chosen Windows folder. Recordings live in the app-specific external captures directory. **Uninstalling the Android app removes its recordings**; download originals first. Interrupted desktop transfers are not presented as complete files.
+- **Материалы** lists up to 100 latest completed files and downloads selected originals to a chosen Windows folder. Recordings use the selected destination (private capture directory or a user-granted document tree). **Uninstalling the app removes its app-private recordings**; download private originals first. Interrupted desktop transfers are not presented as complete files.
 
 ## Public signed updates
 
@@ -62,13 +66,13 @@ Check **Слушать микрофон телефона** to hear live sound on
 
 Hiding/minimizing/pausing a camera's preview stops live monitoring but does not stop an active MP4 sound track. With no listener or recording, the microphone stops. The notification indicates microphone activity.
 
-**Resolution/FPS selectors control the original recording.** Live images remain about 640px at 12fps Eco / up to 24fps normal. Live PCM and JPEG use separate paths and are not lip-synchronized. MP4 uses a common elapsed-realtime origin and hardware audio timestamps when available; an unknown Camera2 timebase uses first-frame calibration. No measured synchronization accuracy is claimed.
+**Resolution/FPS selectors control the original recording.** Remote images use a camera-reported preview size chosen near 960 × 540 at up to 12fps Eco / 24fps normal; the local native viewfinder is separate. Live PCM and JPEG use separate paths and are not lip-synchronized. MP4 uses a common elapsed-realtime origin and hardware audio timestamps when available; an unknown Camera2 timebase uses first-frame calibration. No measured synchronization accuracy is claimed.
 
 ## Background operation and battery
 
 Start the camera while the Android application is visible, then press **Продолжить в фоне**, switch applications or turn off the screen. The existing camera foreground service continues with a visible notification and Stop action. This does not start the camera after a reboot or force-stop, and Android may terminate it under system pressure.
 
-Eco is optional (normal preview is the default) and saved between launches. It reduces JPEG encoding quality from 72 to 60 and caps preview encoding and Windows frame requests at 12fps, without changing recording targets. The sensor FPS range comes from the device; a 5fps sensor mode is not assumed. Recording keeps the selected target FPS. Microphone capture, PCM transmission and AAC encoding also consume battery when enabled.
+Eco is optional (normal preview is the default) and saved between launches. It reduces JPEG encoding quality from 72 to 60 and caps remote preview encoding at 12fps, without changing recording targets. The sensor FPS range comes from the device; a 5fps sensor mode is not assumed. Recording keeps the selected target FPS. Microphone capture, PCM transmission and AAC encoding also consume battery when enabled.
 
 Local preview on the phone is on by default while the activity is visible and can be paused with **Показывать камеру**. It uses a native Camera2 output when the stream combination is supported, with a JPEG compatibility fallback. Returning to the app during an active recording may use JPEG until recording stops, so no recorder restart is required. The screen is never kept awake automatically. Minimizing the Windows desk, hiding a camera by group or unchecking **Предпросмотр** stops its frame requests; status checks slow to once every three seconds. Other visible desks may still request preview. Stopping preview never stops an active recording.
 

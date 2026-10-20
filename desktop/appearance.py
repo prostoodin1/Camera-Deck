@@ -49,6 +49,7 @@ class GlassSheet(QDialog):
 
 class Toggle(QCheckBox):
     def sizeHint(self):return QSize(self.fontMetrics().horizontalAdvance(self.text())+60,30)
+    def hitButton(self,position):return self.rect().contains(position)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor("#ffd76b" if self.isChecked() else "#424242"));p.drawRoundedRect(QRectF(0,5,36,20),10,10)

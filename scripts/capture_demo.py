@@ -62,7 +62,7 @@ class State:
             "frameSequence":int(time.time()*10),"iso":100 if self.index==0 else 200,"exposureNs":10000000,"manualIso":0,"manualExposureNs":0,"focus":-1,
             "lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
             "mode":self.mode,"videoWidth":self.width,"videoHeight":self.height,"videoFps":self.fps,"photoWidth":4000,"photoHeight":3000,"photoFormat":self.photoFormat,
-            "powerState":"record_preview" if self.recording else "preview","eco":True,"previewFps":5,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
+            "powerState":"record_preview" if self.recording else "preview","eco":False,"previewFps":24,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
             "cameras":[{"id":"0","facing":1},{"id":"1","facing":0}],"captureCapabilities":{"videoModes":[{"width":1280,"height":720,"fps":[30,60]},{"width":1920,"height":1080,"fps":[30,60]},{"width":3840,"height":2160,"fps":[30]}],
                 "photoSizes":[{"width":4000,"height":3000},{"width":1920,"height":1080}],"rawSizes":[],"photoFormats":["jpg","png","webp"]}}
 
@@ -75,11 +75,20 @@ def handler(state):
             self.send_response(status);self.send_header("Content-Type",content_type);self.send_header("Content-Length",str(len(body)));self.end_headers();self.wfile.write(body)
         def document(self,data,status=200):self.send(json.dumps(data).encode(),status=status)
         def authorized(self):return self.headers.get("Authorization")=="Bearer demo-session"
+        def handle(self):
+            try:super().handle()
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError,ssl.SSLError):pass
         def do_GET(self):
             if not self.authorized():self.document({"error":"Pair first"},401);return
             path=urlparse(self.path)
             if path.path=="/status":self.document(state.status())
             elif path.path=="/frame":self.send(state.frame,"image/jpeg")
+            elif path.path=="/stream":
+                self.send_response(200);self.send_header("Content-Type","multipart/x-mixed-replace; boundary=aurora");self.end_headers()
+                deadline=time.monotonic()+8
+                while time.monotonic()<deadline:
+                    self.wfile.write(f"--aurora\r\nContent-Length: {len(state.frame)}\r\nX-Rotation: 0\r\n\r\n".encode()+state.frame+b"\r\n");self.wfile.flush();time.sleep(1/24)
+                self.close_connection=True
             elif path.path=="/media":self.document({"files":[{"name":name,"size":len(data)} for name,data in state.files.items()]})
             elif path.path=="/file":
                 name=parse_qs(path.query).get("name",[""])[0]
@@ -130,6 +139,7 @@ def main():
             # Only this test fixture uses loopback; the actual client transport still pins TLS.
             client=CameraClient("192.168.0.1",fingerprint);client.host=host;client.pair("1234")
             tile=CameraTile(window,client,"Симулятор A · интерьер" if i==0 else "Симулятор B · таблица");window.tiles.append(tile)
+            window.devices.append({"name":tile.name.text(),"host":host,"fingerprint":fingerprint})
         window.rebuild();window.show()
         def screenshot(name):app.processEvents();assert window.grab().save(str(out/name))
         def capture_photo():
@@ -149,6 +159,13 @@ def main():
                 return QDialog.DialogCode.Rejected
             QDialog.exec=capture_dialog
             try:window.tiles[0].settings()
+            finally:QDialog.exec=original
+            tile=window.tiles[0];tile.open_fullscreen();app.processEvents();assert tile.fullscreen.isFullScreen();assert not window.isFullScreen()
+            assert tile.fullscreen.grab().save(str(out/"05-fullscreen-monitor.png"));tile.fullscreen.reject();app.processEvents()
+            def capture_popup(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/"06-iso-popover.png"));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_popup
+            try:tile.quick_sensor("iso",tile.iso_readout)
             finally:QDialog.exec=original
             states[1].recording=False
             for tile in window.tiles:tile.status["recording"]=False;tile.stopped.set();tile.monitor.stop()
