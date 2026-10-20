@@ -29,9 +29,10 @@ def make_recording(tmp_path):
     output=tmp_path/'original.mp4';mux=OriginalMuxer(output,formats)
     assert all(not stream.codec_context.is_open for stream in mux.streams.values())
     packets.sort(key=lambda pair:float(pair[1].pts*pair[1].time_base))
-    last={}
+    last={};first_pts={}
     for track,p in packets:
         pts=max(last.get(track,-1)+1,round(float(p.pts*p.time_base)*1e6)+25000);last[track]=pts
+        first_pts.setdefault(track,pts)
         mux.sample(struct.pack('!BqI',track,pts,int(p.is_keyframe))+bytes(p))
     assert mux.complete()
     assert all(not stream.codec_context.is_open for stream in mux.streams.values())
@@ -42,6 +43,11 @@ def make_recording(tmp_path):
         assert len(list(container.decode(video=0)))==30
     with av.open(str(output)) as container:
         assert sum(f.samples for f in container.decode(audio=0))>47000
+    with av.open(str(output)) as container:
+        starts={}
+        for packet in container.demux():
+            if packet.size and packet.pts is not None:starts.setdefault(packet.stream.type,float(packet.pts*packet.time_base))
+    assert abs((starts['audio']-starts['video'])-(first_pts[1]-first_pts[0])/1e6)<.001
     return output
 
 

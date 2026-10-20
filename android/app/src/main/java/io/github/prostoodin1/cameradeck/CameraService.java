@@ -285,7 +285,11 @@ public class CameraService extends Service {
                     byte[] bytes=catalog.thumbnail(filename);Response response=newFixedLengthResponse(Response.Status.OK,"image/jpeg",new ByteArrayInputStream(bytes),bytes.length);response.addHeader("Cache-Control","no-store");return response;
                 }
                 if (s.getMethod() == Method.GET && uri.equals("/media")) {
-                    return json(Response.Status.OK, new JSONObject().put("files", engine.store.files()));
+                    boolean partial="1".equals(s.getParms().get("includePartial"));
+                    if(!s.getParms().containsKey("offset"))return json(Response.Status.OK,new JSONObject().put("files",engine.store.files(partial)));
+                    int offset=Integer.parseInt(s.getParms().get("offset"));if(offset<0||offset>100000)throw new IllegalArgumentException("Invalid media offset");
+                    org.json.JSONArray files=engine.store.files(partial,offset,51);boolean more=files.length()>50;if(more)files.remove(50);
+                    return json(Response.Status.OK,new JSONObject().put("files",files).put("pagination",true).put("nextOffset",more?offset+50:-1));
                 }
                 if (s.getMethod() == Method.GET && uri.equals("/file")) {
                     String filename = s.getParms().getOrDefault("name", "");

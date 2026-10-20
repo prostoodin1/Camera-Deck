@@ -124,10 +124,15 @@ class Studio(QWidget):
         self.selection.blockSignals(False)
         s=self.selected.status if self.selected else {}
         self.status.setText(('Запись идёт' if s.get('recording') else 'Готово' if s.get('ready') else 'Ожидаем состояние')+('\n'+s['error'] if s.get('error') else ''))
+        if s.get('recording'):
+            self.status.setText(self.status.text()+('\nЗвук: аудиодорожка активна' if s.get('audioRecordingActive') else '\nЗвук: ожидаем дорожку' if s.get('audio') else '\nЗапись без звука'))
+        if s.get('micCapturing') and s.get('micLevelDb') is not None:self.status.setText(self.status.text()+f"\nМикрофон: {s['micLevelDb']:.1f} dBFS")
+        if s.get('thermalStatus',-1)>=3:self.status.setText(self.status.text()+'\nСистема сообщает ограничения из-за нагрева')
         self.mode.blockSignals(True);self.mode.setCurrentIndex(1 if s.get('mode')=='video' else 0);self.mode.blockSignals(False);self.mode.setEnabled(bool(s.get('ready')) and not s.get('recording'))
         for key,button in self.readouts.items():
             value={'iso':s.get('iso') or '—','shutter':f"{s.get('exposureNs',0)/1e6:.2f} мс",'focus':'Авто' if s.get('focus',-1)<0 else s['focus']}[key]
             button.setText({'iso':'ISO','shutter':'Выдержка','focus':'Фокус'}[key]+'   '+str(value));button.setEnabled(bool(s.get('ready')))
+        self.photo.setVisible(s.get("mode")=="photo");self.record.setVisible(s.get("mode")=="video")
         self.record.setText('■ Стоп' if s.get('recording') else '● Запись');self.record.setEnabled(bool(s.get('ready')) and s.get('mode')=='video');self.photo.setEnabled(bool(s.get('ready')) and not s.get('recording') and s.get('mode')=='photo')
         job=self.pc_jobs.get(id(self.selected),{})
         active=job.get('state') in ('starting','recording')
@@ -141,6 +146,9 @@ class Studio(QWidget):
             self.tool.blockSignals(True);self.tool.setCurrentIndex(max(0,self.tool.findData(self.selected.video.tool)));self.tool.blockSignals(False)
             if not self.group.hasFocus():self.group.setText(self.selected.group.text())
             for control,value in [(self.view,self.selected.view_toggle.isChecked()),(self.audio,self.selected.listen.isChecked()),(self.lock,self.selected.rotation.locked_base is not None)]:control.blockSignals(True);control.setChecked(value);control.blockSignals(False)
+        for tile in tiles:
+            label=getattr(self.window,'device_state_labels',{}).get(tile.client.host)
+            if label:label.setText(('Нет связи' if tile.failures else '● Запись' if tile.status.get('recording') else 'Подключён')+' · '+tile.client.host)
         self.table.setRowCount(len(tiles))
         for row,tile in enumerate(tiles):
             s=tile.status;elapsed=int(s.get('recordingElapsedMs',0)/1000);free=s.get('storageFreeBytes',-1)
@@ -201,7 +209,7 @@ class Studio(QWidget):
             for name,client in targets:
                 try:
                     estimate=production.estimate_clock(client)
-                    result.append(f"{name}: смещение {estimate['offsetNs']/1e6:+.2f} мс, погрешность не меньше ±{estimate['uncertaintyNs']/1e6:.2f} мс")
+                    result.append(f"{name}: смещение {estimate['offsetNs']/1e6:+.2f} мс, неопределённость оценки ±{estimate['uncertaintyNs']/1e6:.2f} мс")
                 except Exception:result.append(name+': оценка часов недоступна (проверьте связь и версию телефона)')
             return result
         self.window.run(work,lambda rows:[self.timeline.appendPlainText(row) for row in rows])

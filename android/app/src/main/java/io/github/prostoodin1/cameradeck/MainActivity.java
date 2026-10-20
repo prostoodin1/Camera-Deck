@@ -96,8 +96,8 @@ public class MainActivity extends Activity {
         LinearLayout header=row();TextView brand=text("CAMERA DECK",12,WHITE);brand.setLetterSpacing(.10f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
         start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(88),dp(38)));
         Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(102),dp(38));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
-        connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setOnClickListener(v->pairingSettings());top.addView(connection);
-        state=text("Камера выключена",11,YELLOW);top.addView(state);if(landscape){connection.setVisibility(View.GONE);state.setVisibility(View.GONE);}FrameLayout.LayoutParams topLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);if(landscape)topLayout.rightMargin=dp(250);root.addView(top,topLayout);
+        connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setMaxLines(1);connection.setEllipsize(android.text.TextUtils.TruncateAt.END);connection.setOnClickListener(v->pairingSettings());top.addView(connection);
+        state=text("Камера выключена",11,MUTED);top.addView(state);if(landscape){connection.setVisibility(View.GONE);state.setVisibility(View.GONE);}FrameLayout.LayoutParams topLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);if(landscape)topLayout.rightMargin=dp(250);root.addView(top,topLayout);
         LinearLayout bottom=column();bottom.setPadding(dp(14),dp(8),dp(14),dp(12));bottom.setBackground(panel(0xed080a0c,0x00000000,0));
         storage=text("",11,MUTED);storage.setOnClickListener(v->storageSettings());bottom.addView(storage);
         notice=text("",11,MUTED);notice.setMaxLines(2);notice.setOnClickListener(v->{CameraEngine e=engine();if(e!=null&&!e.error.isEmpty())dialog().setTitle("Диагностика камеры").setMessage(e.error).setPositiveButton("Закрыть",null).show();});bottom.addView(notice);

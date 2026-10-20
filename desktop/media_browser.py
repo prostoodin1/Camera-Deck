@@ -14,11 +14,13 @@ class MediaBrowser(QWidget):
     enrichment=pyqtSignal(object)
     progress=pyqtSignal(object)
     def __init__(self,window):
-        super().__init__();self.window=window;self.camera=None;self.epoch=0;self.items={};self.local={};self.downloading=False
+        super().__init__();self.window=window;self.camera=None;self.epoch=0;self.items={};self.local={};self.downloading=False;self.offset=0;self.next_offset=-1
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0)
         bar=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('Поиск по имени');self.search.textChanged.connect(self.filter);bar.addWidget(self.search)
         self.kind=QComboBox();self.kind.addItems(['Все материалы','Видео','Фото','Незавершённые']);self.kind.currentIndexChanged.connect(self.filter);bar.addWidget(self.kind)
-        refresh=QPushButton('Обновить');refresh.clicked.connect(self.reload);bar.addWidget(refresh);layout.addLayout(bar)
+        refresh=QPushButton('Обновить');refresh.clicked.connect(self.reload);bar.addWidget(refresh)
+        self.previous=QPushButton('←');self.previous.setToolTip('Предыдущие материалы');self.previous.clicked.connect(lambda:self.page(max(0,self.offset-50)));bar.addWidget(self.previous)
+        self.next=QPushButton('→');self.next.setToolTip('Следующие материалы');self.next.clicked.connect(lambda:self.page(self.next_offset));bar.addWidget(self.next);layout.addLayout(bar)
         recovery=QPushButton('Восстановить незавершённую запись ПК');recovery.clicked.connect(self.recover);layout.addWidget(recovery)
         self.notice=QLabel('Выберите подключённую камеру в рабочем пространстве «Камера».');self.notice.setWordWrap(True);self.notice.setObjectName('muted');layout.addWidget(self.notice)
         self.list=QListWidget();self.list.setIconSize(__import__('PyQt6.QtCore',fromlist=['QSize']).QSize(128,72));self.list.currentItemChanged.connect(self.selection);layout.addWidget(self.list,1)
@@ -33,14 +35,15 @@ class MediaBrowser(QWidget):
 
     def set_camera(self,camera):
         if camera is self.camera:return
-        self.player.stop();self.camera=camera;self.epoch+=1;self.reload()
+        self.player.stop();self.offset=0;self.camera=camera;self.epoch+=1;self.reload()
 
     def reload(self):
-        self.epoch+=1;epoch=self.epoch;camera=self.camera;self.list.clear();self.items={};self.selection()
+        self.epoch+=1;epoch=self.epoch;camera=self.camera;self.previous.setEnabled(False);self.next.setEnabled(False);self.list.clear();self.items={};self.selection()
         if camera is None:return
         camera_name=camera.name.text();self.notice.setText('Читаем материалы · '+camera_name);client=camera.client
         def loaded(data):
             if epoch!=self.epoch:return
+            self.next_offset=int(data.get('nextOffset',-1));self.next.setEnabled(self.next_offset>=0);self.previous.setEnabled(self.offset>0)
             for entry in data.get('files',[]):
                 item=QListWidgetItem();item.setData(Qt.ItemDataRole.UserRole,entry);self.list.addItem(item);self.items[entry['name']]=item;self.label(item)
             self.notice.setText(f"{camera_name} · материалов: {self.list.count()}. Миниатюры анализируют готовый файл, без изменения оригинала.")
@@ -54,7 +57,11 @@ class MediaBrowser(QWidget):
                     except Exception:thumb=b''
                     self.enrichment.emit((epoch,name,info,thumb))
                 except Exception:continue # Old phones and recording-busy phones keep the textual catalog usable.
-        self.window.run(lambda:client.json('/media'),loaded,lambda message:epoch==self.epoch and self.notice.setText('Каталог недоступен. Проверьте накопитель и повторите.\n'+message))
+        self.window.run(lambda:client.json('/media?includePartial=1&offset='+str(self.offset)),loaded,lambda message:epoch==self.epoch and self.notice.setText('Каталог недоступен. Проверьте накопитель и повторите.\n'+message))
+
+    def page(self,offset):
+        if offset<0:return
+        self.offset=offset;self.reload()
 
     def label(self,item):
         entry=item.data(Qt.ItemDataRole.UserRole);duration=entry.get('durationMs');details=[]

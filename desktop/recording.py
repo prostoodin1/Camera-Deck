@@ -29,7 +29,7 @@ def message(source):
 
 class OriginalMuxer:
     def __init__(self,path,formats):
-        self.path=Path(path);self.output=av.open(str(path),'w',format='mp4',options={'movflags':'frag_keyframe+empty_moov+default_base_moof'})
+        self.path=Path(path);self.output=av.open(str(path),'w',format='mp4',options={'movflags':'frag_keyframe+empty_moov+delay_moov+default_base_moof'})
         self.template=av.open(io.BytesIO(),'w',format='null')
         self.streams={};self.last={};self.counts={};self.total=0;self.closed=False
         try:

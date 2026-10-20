@@ -41,7 +41,7 @@ def test_media_keeps_metadata_if_thumbnail_is_unavailable(tmp_path,monkeypatch):
     class Client:
         host='192.168.1.2';fingerprint='a'*64
         def json(self,path):
-            if path=='/media':return {'files':[{'name':name,'size':100,'complete':True},{'name':name+'.partial','size':10,'complete':False}]}
+            if path.split('?')[0]=='/media':return {'files':[{'name':name,'size':100,'complete':True},{'name':name+'.partial','size':10,'complete':False}]}
             if name+'.partial' in path:raise FileNotFoundError('incomplete')
             return {'width':1280,'height':720,'durationMs':2000}
         def request(self,*a,**kw):raise FileNotFoundError('thumbnail unsupported')

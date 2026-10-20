@@ -130,7 +130,7 @@ class Viewfinder(QLabel):
         self.tool='none';self.grid_lines=False;self.safe_area=False;self.analysis=None
         from monitor_tools import MonitorAnalyzer
         self.analyzer=MonitorAnalyzer(self);self.analyzer.ready.connect(self.analysis_ready)
-        self.backdrop=None;self.frame=None;self.telemetry={};self.message="ОЖИДАНИЕ ИЗОБРАЖЕНИЯ"
+        self.soft_background=False;self.backdrop=None;self.frame=None;self.telemetry={};self.message="ОЖИДАНИЕ ИЗОБРАЖЕНИЯ"
         self.setMinimumSize(240,200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
 
@@ -161,7 +161,7 @@ class Viewfinder(QLabel):
         self.frame=image
         if self.tool!='none':self.analyzer.offer(image,self.tool)
         # A low-resolution, smoothly enlarged frame forms a soft photographic backdrop.
-        self.backdrop=image.scaled(24,14,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+        self.backdrop=image.scaled(24,14,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation) if self.soft_background else None
         self.update()
 
     def set_status(self,status):
@@ -193,6 +193,7 @@ class Viewfinder(QLabel):
                     counts=self.analysis['histogram'];peak=max(counts) or 1;painter.setPen(QPen(QColor('#b3becb'),1))
                     for i,count in enumerate(counts):painter.drawLine(QPointF(scope.left()+i*scope.width()/256,scope.bottom()),QPointF(scope.left()+i*scope.width()/256,scope.bottom()-count/peak*scope.height()))
             if self.tool!='none':
+                painter.fillRect(QRectF(target.left()+8,target.top()+30,270,22),QColor(8,10,12,210))
                 painter.setPen(QColor('#c5cbd3'));painter.setFont(QFont('Segoe UI',8));painter.drawText(int(target.left()+12),int(target.top()+45),'Анализ 8-bit предпросмотра · '+self.tool)
             s=self.telemetry
             def position(x,y):
@@ -215,12 +216,12 @@ class Viewfinder(QLabel):
         # HUD contains only reported state, never fabricated meters or battery estimates.
         painter.fillRect(0,0,self.width(),29,QColor(8,8,8,180));painter.fillRect(0,self.height()-30,self.width(),30,QColor(8,8,8,180))
         painter.setFont(QFont("Segoe UI",10,QFont.Weight.DemiBold))
-        painter.setPen(QColor("#ffd76b"));mode="MOVIE" if s.get("mode")=="video" else "PHOTO"
+        painter.setPen(QColor("#ffd76b"));mode="ВИДЕО" if s.get("mode")=="video" else "ФОТО"
         painter.drawText(11,19,mode)
-        right="● REC" if s.get("recording") else "STBY"
+        right="● ЗАПИСЬ" if s.get("recording") else "ГОТОВО"
         painter.setPen(QColor("#ff5a52") if s.get("recording") else QColor("#dedede"))
-        painter.drawText(self.width()-72,19,right)
-        painter.setPen(QColor("#ffd76b"));painter.drawText(11,self.height()-10,f"ISO {s.get('iso') or '—'}   {shutter_label(s.get('exposureNs',0))}   {'AF' if s.get('focus',-1)<0 else 'MF'}")
+        painter.drawText(self.width()-105,19,right)
+        painter.setPen(QColor("#d7dbe1"));painter.drawText(11,self.height()-10,f"ISO {s.get('iso') or '—'}   {shutter_label(s.get('exposureNs',0))}   {'AF' if s.get('focus',-1)<0 else 'MF'}")
         painter.setPen(QColor("#a0a0a0"))
         quality=f"{s.get('viewFps',0)} fps"
         painter.drawText(self.width()-90,self.height()-10,quality)

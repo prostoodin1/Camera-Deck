@@ -15,9 +15,9 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.8.0"
-VERSION_CODE = 12
-RELEASE_NAME = "Glide"
+VERSION = "0.9.0"
+VERSION_CODE = 13
+RELEASE_NAME = "Slate"
 PRODUCT = "camera-deck-aurora"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))

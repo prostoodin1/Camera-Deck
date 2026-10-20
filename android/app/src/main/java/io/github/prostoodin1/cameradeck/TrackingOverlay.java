@@ -8,8 +8,15 @@ import org.json.*;
 
 final class TrackingOverlay extends View {
     final MainActivity activity;final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
-    float left,top,width,height;int angle;boolean mirror;
-    TrackingOverlay(MainActivity activity){super(activity);this.activity=activity;setContentDescription("Лица, глаза и зона автофокуса. Нажмите для выбора точки фокуса.");}
+    float left,top,width,height;int angle;boolean mirror,scaled;
+    final ScaleGestureDetector zoomGesture;float gestureZoom;long lastZoom;
+    TrackingOverlay(MainActivity activity){super(activity);this.activity=activity;setContentDescription("Видоискатель: нажмите для фокуса, разведите пальцы для зума.");
+        zoomGesture=new ScaleGestureDetector(activity,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
+            @Override public boolean onScaleBegin(ScaleGestureDetector detector){CameraEngine e=activity.engine();if(e==null||!e.ready)return false;gestureZoom=e.zoom;scaled=true;return true;}
+            @Override public boolean onScale(ScaleGestureDetector detector){CameraEngine e=activity.engine();if(e==null)return false;gestureZoom=Math.max(e.minZoom,Math.min(e.maxZoom,gestureZoom*detector.getScaleFactor()));long now=SystemClock.elapsedRealtime();if(now-lastZoom>80){lastZoom=now;activity.command("framing","zoom",gestureZoom,"autoZoom",false);}return true;}
+            @Override public void onScaleEnd(ScaleGestureDetector detector){activity.command("framing","zoom",gestureZoom,"autoZoom",false);}
+        });
+    }
     float[] map(float x,float y){float[] p=Framing.rotate(x,y,angle);if(mirror)p[0]=1-p[0];return new float[]{left+p[0]*width,top+p[1]*height};}
     void geometry(CameraEngine e){
         angle=e.rotation;
@@ -31,7 +38,8 @@ final class TrackingOverlay extends View {
         }catch(JSONException ignored){}
     }
     @Override public boolean onTouchEvent(MotionEvent event){
-        if(event.getAction()!=MotionEvent.ACTION_UP)return true;performClick();CameraEngine e=activity.engine();if(e==null||width<=0||height<=0)return true;
+        if(event.getAction()==MotionEvent.ACTION_DOWN)scaled=false;zoomGesture.onTouchEvent(event);
+        if(event.getAction()!=MotionEvent.ACTION_UP||scaled)return true;performClick();CameraEngine e=activity.engine();if(e==null||width<=0||height<=0)return true;
         float x=(event.getX()-left)/width,y=(event.getY()-top)/height;if(x<0||x>1||y<0||y>1)return true;if(mirror)x=1-x;float[] p=Framing.rotate(x,y,(360-angle)%360);activity.command("framing","focusX",p[0],"focusY",p[1]);return true;
     }
     @Override public boolean performClick(){super.performClick();return true;}

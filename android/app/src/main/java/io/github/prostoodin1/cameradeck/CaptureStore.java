@@ -73,7 +73,9 @@ final class CaptureStore {
         if(!file.delete())throw new IOException("Фото сохранено в папке, но временный оригинал остался на телефоне");
     }
     static boolean valid(String name){return name.matches("CD_[0-9]+_[a-f0-9]{8}\\.(jpg|png|webp|dng|mp4)");}
-    JSONArray files()throws Exception{
+    JSONArray files()throws Exception{return files(false);}
+    JSONArray files(boolean includePartial)throws Exception{return files(includePartial,0,100);}
+    JSONArray files(boolean includePartial,int offset,int limit)throws Exception{
         List<JSONObject> items=new ArrayList<>();
         File[] local=internal.listFiles();if(local!=null)for(File f:local)if(f.isFile()&&listed(f.getName()))items.add(new JSONObject().put("name",f.getName()).put("size",f.length()).put("modified",f.lastModified()));
         if(tree()!=null){Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree(),DocumentsContract.getTreeDocumentId(tree()));
@@ -81,7 +83,7 @@ final class CaptureStore {
                 if(c!=null)while(c.moveToNext())if(listed(c.getString(0)))items.add(new JSONObject().put("name",c.getString(0)).put("size",c.getLong(1)).put("modified",c.getLong(2)));
             }
         }
-        items.sort((a,b)->Long.compare(b.optLong("modified"),a.optLong("modified")));JSONArray result=new JSONArray();for(JSONObject item:items){if(result.length()==100)break;item.put("complete",!item.optString("name").endsWith(".partial"));result.put(item);}return result;
+        items.sort((a,b)->Long.compare(b.optLong("modified"),a.optLong("modified")));JSONArray result=new JSONArray();int index=0;for(JSONObject item:items){if(!includePartial&&item.optString("name").endsWith(".partial"))continue;if(index++<offset)continue;if(result.length()==limit)break;item.put("complete",!item.optString("name").endsWith(".partial"));result.put(item);}return result;
     }
     static boolean listed(String name){return valid(name)||name.endsWith(".partial")&&valid(name.substring(0,name.length()-8));}
     ParcelFileDescriptor descriptor(String name)throws Exception{
@@ -103,5 +105,8 @@ final class CaptureStore {
         }
         throw new FileNotFoundException("Файл или накопитель недоступен");
     }
-    long size(String name)throws Exception{JSONArray list=files();for(int i=0;i<list.length();i++){JSONObject f=list.getJSONObject(i);if(name.equals(f.getString("name")))return f.getLong("size");}throw new FileNotFoundException(name);}
+    long size(String name)throws Exception{
+        try(ParcelFileDescriptor fd=descriptor(name)){long size=fd.getStatSize();if(size>=0)return size;}
+        throw new IOException("Накопитель не сообщает размер файла");
+    }
 }

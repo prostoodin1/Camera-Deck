@@ -13,10 +13,12 @@ final class RecordingRelay extends InputStream {
     static final int MAX_BYTES=64_000_000,MAX_PACKET=8_000_000;
     final ArrayDeque<byte[]> queue=new ArrayDeque<>();
     int bytes,offset;byte[] current=new byte[0],terminal;
-    final long created=SystemClock.elapsedRealtime();
+    final java.util.function.LongSupplier clock;
+    final long created;
     volatile boolean ended,closed,begun;
     volatile String error="";
-    RecordingRelay()throws Exception{json(0,new JSONObject().put("protocol",1).put("phoneBackup",true));}
+    RecordingRelay()throws Exception{this(SystemClock::elapsedRealtime);}
+    RecordingRelay(java.util.function.LongSupplier clock)throws Exception{this.clock=clock;created=clock.getAsLong();json(0,new JSONObject().put("protocol",1).put("phoneBackup",true));}
     synchronized void add(byte[] message){
         if(ended||closed)return;
         if(message.length>MAX_PACKET||bytes+message.length>MAX_BYTES){finish("Сеть не успевает. Запись на телефоне продолжается.");return;}
@@ -53,7 +55,7 @@ final class RecordingRelay extends InputStream {
             if(closed)return -1;
             if(!queue.isEmpty()){current=queue.removeFirst();bytes-=current.length;offset=0;break;}
             if(ended){if(terminal==null)return -1;current=terminal;terminal=null;offset=0;break;}
-            if(!begun&&SystemClock.elapsedRealtime()-created>30000){finish("Не дождались начала записи");continue;}
+            if(!begun&&clock.getAsLong()-created>30000){finish("Не дождались начала записи");continue;}
             try{wait(1000);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException(e);}
         }
         int n=Math.min(length,current.length-offset);System.arraycopy(current,offset,b,off,n);offset+=n;return n;

@@ -127,7 +127,7 @@ class CameraTile(QWidget):
                 if widget:widget.hide();self.details.append(widget)
         self.group.hide()
         rail=QHBoxLayout();select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
-        self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:self.record.click());rail.addWidget(self.quick_record);box.addLayout(rail)
+        self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:(self.photo if self.status.get("mode")=="photo" else self.record).click());rail.addWidget(self.quick_record);box.addLayout(rail)
 
     def framing_settings(self):
         s=self.status;dialog=GlassSheet(self.window);dialog.setWindowTitle("Композиция и просмотр");form=QFormLayout(dialog)
@@ -283,8 +283,8 @@ class CameraTile(QWidget):
         if self.status.get("recording") and not status.get("recording"):self.client.force_avc=True
         self.status = status
         if hasattr(self,'quick_record'):
-            self.quick_record.setText('■ Стоп' if status.get('recording') else '● Запись')
-            self.quick_record.setEnabled(bool(status.get('ready')) and status.get('mode')=='video')
+            self.quick_record.setText('Снять фото' if status.get('mode')=='photo' else '■ Стоп' if status.get('recording') else '● Запись')
+            self.quick_record.setEnabled(bool(status.get('ready')) and not status.get('photoPending'))
         self.failures = 0
         recording = status.get("recording", False)
         self.video.set_status(status)
@@ -549,16 +549,22 @@ class Window(QMainWindow):
     def refresh_devices(self):
         while self.device_cards_layout.count():
             item=self.device_cards_layout.takeAt(0)
-            if item.widget():item.widget().deleteLater()
-        if not self.devices:
-            label=QLabel("Ищем доступные телефоны…\n\nНе найден? Нажмите «По IP».");label.setWordWrap(True);self.device_cards_layout.addWidget(label)
-        for device in self.devices:
+            if item.widget():item.widget().hide();item.widget().deleteLater()
+        entries=list(self.devices);known={d['host'] for d in entries}
+        for tile in self.tiles:
+            if tile.client.host not in known:entries.append(dict(host=tile.client.host,name=tile.name.text(),fingerprint=getattr(tile.client,'fingerprint','')))
+        self.device_state_labels={}
+        if not entries:
+            label=QLabel("Телефоны пока не найдены.\nВключите камеру и нажмите «Найти».\nЕсли поиск недоступен, подключитесь по IP.");label.setWordWrap(True);self.device_cards_layout.addWidget(label)
+        for device in entries:
             card=QFrame();card.setObjectName("tile");box=QVBoxLayout(card)
-            name=QLabel(device['name']);name.setWordWrap(True);name.setStyleSheet("font-size:15px;font-weight:600");box.addWidget(name)
-            box.addWidget(QLabel(device['host']))
-            connected=any(t.client.host==device['host'] for t in self.tiles)
-            button=QPushButton("Подключён" if connected else "Подключить →");button.setObjectName("primary");button.setEnabled(not connected)
-            button.clicked.connect(lambda checked=False,d=device:self.begin_connect(d['host'],d['name'],d['fingerprint']));box.addWidget(button);self.device_cards_layout.addWidget(card)
+            name=QLabel(device['name']);name.setWordWrap(True);name.setStyleSheet("font-size:13px;font-weight:600");box.addWidget(name)
+            state=QLabel(device['host']);state.setObjectName('muted');box.addWidget(state);self.device_state_labels[device['host']]=state
+            connected=next((t for t in self.tiles if t.client.host==device['host']),None)
+            button=QPushButton("Управление" if connected else "Подключить");button.setObjectName("navigation" if connected else "primary")
+            if connected:button.clicked.connect(lambda checked=False,t=connected:(self.studio.select(t),self.studio.navigate(1)))
+            else:button.clicked.connect(lambda checked=False,d=device:self.begin_connect(d['host'],d['name'],d['fingerprint']))
+            box.addWidget(button);self.device_cards_layout.addWidget(card)
 
     def trusted_devices(self):
         try:devices=trusted.load()
@@ -705,7 +711,7 @@ class Window(QMainWindow):
         self.run(work,lambda _: self.message("Android","Пакет проверен и передан. На телефоне нажмите «Установить обновление» и подтвердите установку."))
 
     def closeEvent(self,event:QCloseEvent):
-        if self.is_recording() and QMessageBox.question(self,"Закрыть пульт", "Есть запись или потеряна связь. Камеры на телефонах продолжат работу. Закрыть пульт?") != QMessageBox.StandardButton.Yes:
+        if self.is_recording() and QMessageBox.question(self,"Закрыть пульт", "Есть запись или потеряна связь. Камеры на телефонах продолжат работу. Копия, записываемая на ПК, будет прервана и может потребовать восстановления. Закрыть пульт?") != QMessageBox.StandardButton.Yes:
             event.ignore(); return
         if self.auto.isChecked() and self.available and self.available['code']>updates.VERSION_CODE and not self.is_recording() and getattr(sys,'frozen',False):
             try:
@@ -713,6 +719,7 @@ class Window(QMainWindow):
                 if candidate.is_file():updates.restart_with_update(candidate,self.available)
             except Exception as exc:self.message("Обновление",str(exc))
         self.save_preferences()
+        self.timer.stop();self.discovery_timer.stop();self.studio.timer.stop();self.studio.media.epoch+=1
         if hasattr(self,"studio"):self.studio.media.player.stop()
         for tile in self.tiles: tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close()
         event.accept()
