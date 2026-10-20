@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 from protocol import CameraClient, discover, StreamUnavailable
 from audio import AudioMonitor
-from appearance import THEME,Viewfinder,shutter_label,GlassSheet,Toggle,SliderField
+from appearance import THEME,Viewfinder,shutter_label,GlassSheet,Toggle,SliderField,DropdownButton
 import updates
 
 
@@ -56,14 +56,14 @@ class CameraTile(QWidget):
         self.group.editingFinished.connect(window.rebuild)
         remove = QPushButton("Откл.");remove.setToolTip("Отключить эту камеру от пульта")
         remove.clicked.connect(lambda: window.remove(self))
-        full=QPushButton("⛶");full.setToolTip("Открыть камеру во весь экран");full.clicked.connect(self.open_fullscreen);heading.addWidget(full)
+        full=QPushButton("На весь экран");full.setToolTip("Открыть камеру во весь экран");full.clicked.connect(self.open_fullscreen);heading.addWidget(full)
         heading.addWidget(self.name, 2); heading.addWidget(self.group, 1); heading.addWidget(remove)
         box.addLayout(heading)
         self.video = Viewfinder()
         box.addWidget(self.video,1)
         readings=QHBoxLayout();readings.setSpacing(4)
-        self.iso_readout=QPushButton("ISO —");self.shutter_readout=QPushButton("S —")
-        self.focus_readout=QPushButton("AF");self.profile_readout=QPushButton("—")
+        self.iso_readout=DropdownButton("ISO —");self.shutter_readout=DropdownButton("S —")
+        self.focus_readout=DropdownButton("AF");self.profile_readout=DropdownButton("—")
         for button in (self.iso_readout,self.shutter_readout,self.focus_readout,self.profile_readout):
             button.setObjectName("readout");readings.addWidget(button)
         self.iso_readout.clicked.connect(lambda:self.settings(1));self.shutter_readout.clicked.connect(lambda:self.settings(1))
@@ -195,9 +195,9 @@ class CameraTile(QWidget):
         recording = status.get("recording", False)
         self.video.set_status(status)
         if self.fullscreen is not None:self.full_view.set_status(status)
-        self.iso_readout.setText("ISO  "+("Авто" if not status.get("manualIso") else str(status.get("manualIso")))+" ▾")
-        self.shutter_readout.setText("Выдержка  "+("Авто" if not status.get("manualExposureNs") else shutter_label(status["manualExposureNs"]))+" ▾")
-        self.focus_readout.setText("Фокус  "+("Авто" if status.get("focus",-1)<0 else f"{status['focus']:.1f}")+" ▾")
+        self.iso_readout.setText("ISO  "+("Авто" if not status.get("manualIso") else str(status.get("manualIso")))+"   ")
+        self.shutter_readout.setText("Выдержка  "+("Авто" if not status.get("manualExposureNs") else shutter_label(status["manualExposureNs"]))+"   ")
+        self.focus_readout.setText("Фокус  "+("Авто" if status.get("focus",-1)<0 else f"{status['focus']:.1f}")+"   ")
         self.profile_readout.setText(f"{status.get('videoHeight',1080)}p {status.get('videoFps',30)}" if status.get("mode")=="video" else status.get("photoFormat","jpg").upper())
         mode=status.get("mode","photo")
         self.mode.setCurrentIndex(1 if mode=="video" else 0);self.mode.setEnabled(not recording and status.get("ready",False))

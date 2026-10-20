@@ -55,12 +55,27 @@ final class AvRecorder implements AutoCloseable {
         }
         video=v; audio=a; muxer=m; surface=s;
     }
-    static MediaFormat videoFormat(int w,int h,int fps) {
-        MediaFormat f=MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC,w,h);
+    static MediaFormat basicFormat(String mime,int w,int h,int fps,int bitrate) {
+        MediaFormat f=MediaFormat.createVideoFormat(mime,w,h);
         f.setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         f.setInteger(MediaFormat.KEY_FRAME_RATE,fps);
-        f.setInteger(MediaFormat.KEY_BIT_RATE,(int)Math.min(Integer.MAX_VALUE,Math.max(2_000_000L,(long)w*h*fps/5)));
+        f.setInteger(MediaFormat.KEY_BIT_RATE,bitrate);
         f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1); return f;
+    }
+    static MediaFormat videoFormat(int w,int h,int fps) {
+        int target=(int)Math.min(Integer.MAX_VALUE,Math.max(2_000_000L,(long)w*h*fps/5));
+        for(String mime:new String[]{MediaFormat.MIMETYPE_VIDEO_AVC,MediaFormat.MIMETYPE_VIDEO_HEVC}){
+            for(MediaCodecInfo info:new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()){
+                if(!info.isEncoder()||!Arrays.asList(info.getSupportedTypes()).contains(mime))continue;
+                try{
+                    MediaCodecInfo.CodecCapabilities caps=info.getCapabilitiesForType(mime);MediaCodecInfo.VideoCapabilities video=caps.getVideoCapabilities();
+                    if(video==null||!video.areSizeAndRateSupported(w,h,fps))continue;
+                    android.util.Range<Integer> range=video.getBitrateRange();MediaFormat format=basicFormat(mime,w,h,fps,Math.max(range.getLower(),Math.min(target,range.getUpper())));
+                    if(caps.isFormatSupported(format))return format;
+                }catch(IllegalArgumentException ignored){}
+            }
+        }
+        return basicFormat(MediaFormat.MIMETYPE_VIDEO_AVC,w,h,fps,target);
     }
     Surface getSurface() { return surface; }
     void start() {

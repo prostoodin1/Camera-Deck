@@ -1,8 +1,15 @@
 """Camera Deck's minimal glass theme and viewfinder."""
 from PyQt6.QtCore import Qt,QRectF,QSize,QPoint
 from PyQt6.QtGui import QColor,QPainter,QPen,QFont
-from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider
+from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider,QPushButton
 import math
+
+
+class DropdownButton(QPushButton):
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setPen(QPen(QColor("#ffd76b"),1.5));x=self.width()-13;y=self.height()/2
+        p.drawLine(int(x-3),int(y-2),int(x),int(y+1));p.drawLine(int(x),int(y+1),int(x+3),int(y-2));p.end()
 
 
 class SliderField(QWidget):

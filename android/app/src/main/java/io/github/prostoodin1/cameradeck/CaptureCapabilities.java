@@ -26,7 +26,7 @@ final class CaptureCapabilities {
                 if(!ae || (duration>0 && duration>1_000_000_000L/fps+1000))continue;
                 try{if(codecs.findEncoderForFormat(AvRecorder.videoFormat(size.getWidth(),size.getHeight(),fps))!=null)rates.put(fps);}catch(IllegalArgumentException ignored){}
             }
-            if(rates.length()>0)video.put(new JSONObject().put("width",size.getWidth()).put("height",size.getHeight()).put("fps",rates));
+            if(rates.length()>0)video.put(new JSONObject().put("width",size.getWidth()).put("height",size.getHeight()).put("fps",rates).put("codec",AvRecorder.videoFormat(size.getWidth(),size.getHeight(),rates.getInt(rates.length()-1)).getString(MediaFormat.KEY_MIME)));
         }
         addSizes(processed,map.getOutputSizes(ImageFormat.JPEG));addSizes(processed,map.getHighResolutionOutputSizes(ImageFormat.JPEG));
         int[] capabilities=c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
