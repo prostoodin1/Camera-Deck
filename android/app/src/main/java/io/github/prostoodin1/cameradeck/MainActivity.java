@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
     GradientDrawable panel(int fill,int stroke,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(radius));d.setStroke(dp(1),stroke);return d;}
     TextView text(String value,int size,int color){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(color);t.setPadding(dp(6),dp(6),dp(6),dp(6));return t;}
     void buttonStyle(Button b,boolean primary){b.setTextColor(primary?BLACK:YELLOW);b.setBackground(panel(primary?YELLOW:PANEL,primary?YELLOW:0xff424242,14));b.setAlpha(b.isEnabled()?1f:0.4f);}
-    Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setTextSize(13);b.setAllCaps(false);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),dp(6),dp(8),dp(6));buttonStyle(b,false);b.setOnClickListener(v->action.run());return b;}
+    Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setTextSize(13);b.setAllCaps(false);b.setSingleLine(true);b.setAutoSizeTextTypeUniformWithConfiguration(10,13,1,android.util.TypedValue.COMPLEX_UNIT_SP);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),dp(6),dp(8),dp(6));buttonStyle(b,false);b.setOnClickListener(v->action.run());return b;}
     LinearLayout column(){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);return c;}
     LinearLayout row(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setGravity(Gravity.CENTER_VERTICAL);return r;}
     void cell(LinearLayout row,View view,int height){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(height),1);p.setMargins(dp(3),dp(3),dp(3),dp(3));row.addView(view,p);}
@@ -90,7 +90,10 @@ public class MainActivity extends Activity {
         LinearLayout controls=row();mode=button("Фото",()->{CameraEngine e=engine();if(e!=null)command("capture_config","mode",e.captureMode.equals("photo")?"video":"photo");});
         shutter=button("●",()->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});shutter.setTextSize(22);
         cell(controls,mode,52);cell(controls,shutter,60);cell(controls,button("Объектив",this::lensSettings),52);bottom.addView(controls);
-        LinearLayout menus=row();formatReadout=button("Качество ▴",this::captureSettings);cell(menus,formatReadout,44);cell(menus,button("Экспозиция ▴",this::sensorSettings),44);cell(menus,button("Ещё ▴",this::powerSettings),44);bottom.addView(menus);
+        LinearLayout menus=landscape?column():row();formatReadout=button("Качество ▴",this::captureSettings);
+        for(Button menu:new Button[]{formatReadout,button("Экспозиция ▴",this::sensorSettings),button("Ещё ▴",this::powerSettings)}){
+            if(landscape){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(44));p.setMargins(dp(3),dp(3),dp(3),dp(3));menus.addView(menu,p);}else cell(menus,menu,44);
+        }bottom.addView(menus);
         telemetry=text("",11,MUTED);telemetry.setGravity(Gravity.CENTER);bottom.addView(telemetry);root.addView(bottom,new FrameLayout.LayoutParams(landscape?dp(250):-1,-2,landscape?(Gravity.RIGHT|Gravity.CENTER_VERTICAL):Gravity.BOTTOM));
         isoReadout=button("",this::sensorSettings);shutterReadout=button("",this::sensorSettings);
         localPreview=check("Показывать камеру",true);localPreview.setOnCheckedChangeListener((v,value)->{showPreview=value;CameraEngine e=engine();if(!value&&e!=null)e.hideLocal();sequence=-1;});
