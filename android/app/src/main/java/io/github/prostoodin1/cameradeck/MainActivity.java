@@ -213,13 +213,15 @@ public class MainActivity extends Activity {
         CameraEngine e=engine();if(e==null||!nativeView.isAvailable()||e.previewWidth==0)return;
         int width=nativeView.getWidth(),height=nativeView.getHeight(),display=getWindowManager().getDefaultDisplay().getRotation();if(width==0||height==0)return;
         long key=Objects.hash(width,height,e.previewWidth,e.previewHeight,display,e.cameraId);if(key==transformKey)return;transformKey=key;
-        // TextureView already applies the camera producer's sensor transform.
-        // Apply only display rotation and aspect correction, not sensor rotation twice.
-        float bw=e.previewWidth,bh=e.previewHeight;boolean swap=(e.rotation%180)!=0;
-        float rw=swap?bh:bw,rh=swap?bw:bh,scale=Math.min(width/rw,height/rh);
-        Matrix m=new Matrix();m.setScale(rw*scale/width,rh*scale/height,width/2f,height/2f);
-        if(display!=0)m.postRotate(-display*90,width/2f,height/2f);
-        boolean front=e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));if(front)m.postScale(-1,1,width/2f,height/2f);
+        float bw=e.previewWidth,bh=e.previewHeight,cx=width/2f,cy=height/2f;Matrix m=new Matrix();
+        if(display==Surface.ROTATION_90||display==Surface.ROTATION_270){
+            RectF view=new RectF(0,0,width,height),buffer=new RectF(0,0,bh,bw);buffer.offset(cx-buffer.centerX(),cy-buffer.centerY());
+            m.setRectToRect(view,buffer,Matrix.ScaleToFit.FILL);float scale=Math.min(height/bh,width/bw);m.postScale(scale,scale,cx,cy);m.postRotate(90*(display-2),cx,cy);
+        }else{
+            Integer sensor=e.characteristics==null?90:e.characteristics.get(android.hardware.camera2.CameraCharacteristics.SENSOR_ORIENTATION);boolean swap=sensor!=null&&sensor%180!=0;
+            float rw=swap?bh:bw,rh=swap?bw:bh,scale=Math.min(width/rw,height/rh);m.setScale(rw*scale/width,rh*scale/height,cx,cy);if(display==Surface.ROTATION_180)m.postRotate(180,cx,cy);
+        }
+        boolean front=e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));if(front)m.postScale(-1,1,cx,cy);
         nativeView.setTransform(m);
     }
 
