@@ -10,6 +10,7 @@ for name in ("PyQt6","PyQt6-Qt6","PyQt6-sip","cryptography","cffi","pycparser","
     distribution=metadata.distribution(name)
     destination=out/(name+"-"+distribution.version);destination.mkdir(exist_ok=True)
     for item in distribution.files or []:
+        if item.suffix=='.pyc' or '__pycache__' in item.parts:continue
         text=str(item).replace("\\","/")
         if "/licenses/" not in text and "LICENSE" not in item.name.upper() and "COPYING" not in item.name.upper():continue
         source=Path(distribution.locate_file(item))

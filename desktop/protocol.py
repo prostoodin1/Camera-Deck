@@ -168,7 +168,7 @@ class CameraClient:
 
     def renew(self, previous):
         with self.session_lock:
-            if self.token==previous:self.resume(self.refresh_secret)
+            if self.token==previous:self.resume(self.refresh_secret);self.force_avc=True
 
     def command(self, action: str, **kwargs) -> dict:
         return self.json("/command", {"action": action, **kwargs})

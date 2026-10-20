@@ -129,7 +129,8 @@ class CameraTile(QWidget):
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
         def work():
             self.client.command('framing',zoom=zoom.value(),autoZoom=automatic.isChecked(),tracking=tracking.isChecked(),faceFocus=face.isChecked(),preset=preset.currentData())
-            if quality.currentData()!=s.get('streamProfile','balanced'):self.client.command('stream_config',profile=quality.currentData())
+            if quality.currentData()!=s.get('streamProfile','balanced'):
+                self.client.command('stream_config',profile=quality.currentData());self.client.force_avc=True
         self.window.run(work)
 
     def set_preview_active(self, visible):
@@ -180,6 +181,7 @@ class CameraTile(QWidget):
     def receive_frames(self):
         stream_supported=hasattr(self.client,"frames");avc=True
         while not self.stopped.is_set():
+            if getattr(self.client,'force_avc',False):avc=True;self.client.force_avc=False
             if not self.preview_enabled.is_set() or self.paused.is_set():self.stopped.wait(.1);continue
             try:
                 if avc:
@@ -190,7 +192,7 @@ class CameraTile(QWidget):
                 elif stream_supported:
                     self.transport="JPEG"
                     for data,rotation in self.client.frames(self.stopped,self.preview_enabled):
-                        if self.paused.is_set():break
+                        if self.paused.is_set() or getattr(self.client,'force_avc',False):break
                         image=QImage.fromData(data)
                         if not image.isNull():
                             with self.frame_lock:self.pending_frame=(image,rotation)
@@ -248,7 +250,7 @@ class CameraTile(QWidget):
         self.listen.setEnabled(status.get("audioAvailable",False))
         self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  {self.transport} {self.measured_fps:.0f} fps")
         free=status.get("storageFreeBytes",-1)
-        if free>=0:self.info.setText(f"{status.get('storageName','Телефон')} · {free/1073741824:.1f} ГБ свободно"+("  ·  "+status['error'] if status.get('error') else ""))
+        if free>=0:self.info.setText(f"{self.transport} · {self.measured_fps:.0f} fps  /  {status.get('storageName','Телефон')} · {free/1073741824:.1f} ГБ свободно"+("  ·  "+status['error'] if status.get('error') else ""))
         self.info.setToolTip(status.get("lastFile", ""))
         if not status.get("auroraUpdates",False):
             self.phone_update.setEnabled(False); self.phone_update.hide()

@@ -20,7 +20,7 @@ def key():
     public=private.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo)
     for name in ('desktop/aurora-update-public.pem','android/app/src/main/assets/aurora-update-public.pem'):
         target=ROOT/name
-        if target.exists() and target.read_bytes()!=public:raise RuntimeError('Aurora identity mismatch')
+        if target.exists() and serialization.load_pem_public_key(target.read_bytes()).public_numbers()!=private.public_key().public_numbers():raise RuntimeError('Aurora identity mismatch')
         target.write_bytes(public)
     return private
 

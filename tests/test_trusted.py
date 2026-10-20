@@ -28,3 +28,11 @@ def test_pair_requires_pin_even_when_remembering(monkeypatch):
     client=CameraClient('192.168.1.2','a'*64)
     monkeypatch.setattr(client,'json',lambda *args:pytest.fail('Invalid PIN must not reach network'))
     with pytest.raises(ValueError):client.pair('abcd',True)
+
+
+def test_parallel_status_and_stream_expiry_renews_only_the_old_session(monkeypatch):
+    client=CameraClient('192.168.1.2','a'*64);client.token='expired';client.refresh_secret='b'*64;calls=[]
+    def resume(secret):calls.append(secret);client.token='new-session'
+    monkeypatch.setattr(client,'resume',resume)
+    client.renew('expired');client.renew('expired')
+    assert calls==['b'*64] and client.force_avc
