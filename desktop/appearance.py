@@ -91,6 +91,31 @@ QSlider::handle:horizontal:disabled {background:#777777;border-color:#777777}
 """
 
 
+# Shared role palette matches CameraDesign on Android.
+THEME += """
+QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#080a0c;color:#eef0f3}
+QWidget {font-family:'Segoe UI';font-size:12px;color:#eef0f3}
+QFrame#surface,QWidget#surface,QWidget#tile {background:#15181c;border:1px solid #30353c;border-radius:8px}
+QPushButton {background:#1b2026;border:1px solid #30353c;border-radius:6px;padding:7px 11px;min-height:18px;color:#d7dbe1}
+QPushButton:hover {background:#2a3038;color:#ffffff;border-color:#626b77}
+QPushButton#navigation {background:transparent;border:0;color:#969da7;padding:8px 14px}
+QPushButton#navigation:checked {background:#252b33;color:#ffd76b}
+QPushButton#recordAction {color:#ff8e8e;background:#291c21;border-color:#674049}
+QPushButton#primary {background:#ffd76b;color:#080a0c;border:0}
+QLabel#muted {color:#969da7}
+QLabel#emptyMonitor {background:#0d1014;color:#969da7;border:1px dashed #30353c;border-radius:8px;padding:30px;font-size:15px}
+QMenuBar,QMenu {background:#101318;color:#d7dbe1;border:0}
+QMenuBar::item:selected,QMenu::item:selected {background:#30353c}
+QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#101318;color:#eef0f3;border:1px solid #30353c;border-radius:6px;padding:6px 8px}
+QTableWidget,QListWidget,QPlainTextEdit {background:#101318;color:#d7dbe1;border:1px solid #30353c;border-radius:6px;selection-background-color:#353d48;gridline-color:#252b33}
+QHeaderView::section {background:#1b2026;color:#969da7;border:0;padding:9px}
+QListWidget::item {padding:10px;border-bottom:1px solid #252b33}
+QProgressBar {background:#101318;border:0;border-radius:3px;max-height:6px;color:transparent}
+QProgressBar::chunk {background:#ffd76b;border-radius:3px}
+QSplitter::handle {background:#080a0c;width:10px}
+"""
+
+
 def shutter_label(nanoseconds):
     seconds=nanoseconds/1e9
     if seconds<=0:return "—"

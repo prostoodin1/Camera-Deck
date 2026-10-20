@@ -33,6 +33,9 @@ final class CameraEngine implements AutoCloseable {
     CaptureStore.Target recordingTarget;
     final Object frameReady=new Object();
     volatile boolean nativePreview;
+    volatile LocalPreview localDisplay;
+    volatile double localDisplayFps,localConversionMs,localHandoffMs;
+    volatile long recordingStartedMs;
     volatile int previewWidth,previewHeight;
     LocalOutput localOutput;
     final List<LocalOutput> retiredOutputs=new ArrayList<>();
@@ -299,9 +302,11 @@ final class CameraEngine implements AutoCloseable {
                 if (img == null || (!trackingNeeded()&&!power.remotePreview(SystemClock.elapsedRealtime())&&nativePreview) || !power.preview(SystemClock.elapsedRealtime()) || System.nanoTime() - lastPreview < 1_000_000_000L/power.fps()) return;
                 lastPreview = System.nanoTime();
                 boolean detection=trackingNeeded()&&tracker.wants();
-                boolean jpeg=(liveUsers==0&&power.remotePreview(SystemClock.elapsedRealtime()))||!nativePreview;
-                if(!detection&&!jpeg)return;
+                boolean jpeg=liveUsers==0&&power.remotePreview(SystemClock.elapsedRealtime());
+                boolean local=!nativePreview&&localDisplay!=null&&power.localPreview(SystemClock.elapsedRealtime());
+                if(!detection&&!jpeg&&!local)return;
                 byte[] nv21 = nv21(img);
+                LocalPreview display=localDisplay;if(local&&display!=null)display.offer(nv21,img.getWidth(),img.getHeight(),rotation);
                 if(detection)tracker.offer(nv21,img.getWidth(),img.getHeight(),rotation,this);
                 if(!jpeg)return;
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -391,7 +396,7 @@ final class CameraEngine implements AutoCloseable {
                     if(streaming!=null&&liveUsers>0)request.addTarget(streaming.surface);
                     settings(request);
                     // Start recorder before applying demand so the recording target is never removed.
-                    if (video) { repeat();if(!recorder.started)recorder.start(); recording = true; }
+                    if (video) { repeat();if(!recorder.started)recorder.start(); recordingStartedMs=SystemClock.elapsedRealtime();recording = true; }
                     busy = false; ready = true; appliedPlan = null; applyDemand(true);
                 } catch (Exception e) {
                     recording=false;busy=false;fail(e);releaseRecorder();
@@ -555,6 +560,7 @@ final class CameraEngine implements AutoCloseable {
     }
     JSONObject status() throws Exception {
         JSONObject o = new JSONObject().put("ready", ready).put("recording", recording).put("photoPending",photoPending).put("error", error)
+            .put("recordingElapsedMs",recording?SystemClock.elapsedRealtime()-recordingStartedMs:0).put("localDisplayFps",localDisplayFps).put("localConversionMs",localConversionMs).put("localHandoffMs",localHandoffMs)
             .put("cameraId", cameraId).put("rotation", rotation).put("frameTime", frameTime).put("frameSequence", frameSequence)
             .put("iso", measuredIso).put("exposureNs", measuredExposure).put("manualIso", iso).put("manualExposureNs", exposure).put("focus", focus)
             .put("lastFile", lastFile).put("audio", sound).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility");

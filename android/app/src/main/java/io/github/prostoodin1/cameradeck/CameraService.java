@@ -267,6 +267,12 @@ public class CameraService extends Service {
                     response.addHeader("Cache-Control","no-store");return response;
                 }
                 if (s.getMethod() == Method.POST && uri.equals("/command")) return json(Response.Status.OK, engine.command(body(s)));
+                if(s.getMethod()==Method.GET&&(uri.equals("/media_info")||uri.equals("/thumbnail"))){
+                    if(engine.recording||engine.busy||engine.photoPending)return error(Response.Status.CONFLICT,"Метаданные доступны после съёмки");
+                    String filename=s.getParms().getOrDefault("name","");MediaCatalog catalog=new MediaCatalog(engine.store);
+                    if(uri.equals("/media_info"))return json(Response.Status.OK,catalog.info(filename));
+                    byte[] bytes=catalog.thumbnail(filename);Response response=newFixedLengthResponse(Response.Status.OK,"image/jpeg",new ByteArrayInputStream(bytes),bytes.length);response.addHeader("Cache-Control","no-store");return response;
+                }
                 if (s.getMethod() == Method.GET && uri.equals("/media")) {
                     return json(Response.Status.OK, new JSONObject().put("files", engine.store.files()));
                 }

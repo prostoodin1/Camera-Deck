@@ -75,13 +75,23 @@ final class CaptureStore {
     static boolean valid(String name){return name.matches("CD_[0-9]+_[a-f0-9]{8}\\.(jpg|png|webp|dng|mp4)");}
     JSONArray files()throws Exception{
         List<JSONObject> items=new ArrayList<>();
-        File[] local=internal.listFiles();if(local!=null)for(File f:local)if(valid(f.getName()))items.add(new JSONObject().put("name",f.getName()).put("size",f.length()).put("modified",f.lastModified()));
+        File[] local=internal.listFiles();if(local!=null)for(File f:local)if(f.isFile()&&listed(f.getName()))items.add(new JSONObject().put("name",f.getName()).put("size",f.length()).put("modified",f.lastModified()));
         if(tree()!=null){Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree(),DocumentsContract.getTreeDocumentId(tree()));
             try(Cursor c=context.getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_SIZE,DocumentsContract.Document.COLUMN_LAST_MODIFIED},null,null,null)){
-                if(c!=null)while(c.moveToNext())if(valid(c.getString(0)))items.add(new JSONObject().put("name",c.getString(0)).put("size",c.getLong(1)).put("modified",c.getLong(2)));
+                if(c!=null)while(c.moveToNext())if(listed(c.getString(0)))items.add(new JSONObject().put("name",c.getString(0)).put("size",c.getLong(1)).put("modified",c.getLong(2)));
             }
         }
-        items.sort((a,b)->Long.compare(b.optLong("modified"),a.optLong("modified")));JSONArray result=new JSONArray();for(JSONObject item:items){if(result.length()==100)break;result.put(item);}return result;
+        items.sort((a,b)->Long.compare(b.optLong("modified"),a.optLong("modified")));JSONArray result=new JSONArray();for(JSONObject item:items){if(result.length()==100)break;item.put("complete",!item.optString("name").endsWith(".partial"));result.put(item);}return result;
+    }
+    static boolean listed(String name){return valid(name)||name.endsWith(".partial")&&valid(name.substring(0,name.length()-8));}
+    ParcelFileDescriptor descriptor(String name)throws Exception{
+        if(!valid(name))throw new IOException("Недопустимое имя файла");
+        File file=new File(internal,name);if(file.isFile())return ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY);
+        if(tree()!=null){Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree(),DocumentsContract.getTreeDocumentId(tree()));
+            try(Cursor c=context.getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
+                if(c!=null)while(c.moveToNext())if(name.equals(c.getString(1))){ParcelFileDescriptor fd=context.getContentResolver().openFileDescriptor(DocumentsContract.buildDocumentUriUsingTree(tree(),c.getString(0))),"r");if(fd!=null)return fd;}
+            }
+        }throw new FileNotFoundException("Материал или накопитель недоступен");
     }
     InputStream open(String name)throws Exception{
         if(!valid(name))throw new IOException("Недопустимое имя файла");

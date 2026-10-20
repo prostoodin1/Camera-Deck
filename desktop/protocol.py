@@ -175,7 +175,7 @@ class CameraClient:
         if action in ('camera','stream_config'):self.force_avc=True
         return result
 
-    def download(self, filename: str, folder: Path) -> Path:
+    def download(self, filename: str, folder: Path, progress=None) -> Path:
         import re
         if not re.fullmatch(r"CD_\d+_[a-f0-9]{8}\.(jpg|png|webp|dng|mp4)", filename):
             raise ValueError("Недопустимое имя файла")
@@ -197,6 +197,8 @@ class CameraClient:
                 while chunk := response.read(256 * 1024):
                     out.write(chunk)
                     count += len(chunk)
+                    if count>expected:raise ValueError("Файл превышает заявленный размер")
+                    if progress:progress(count,expected)
             if count != expected:
                 raise ValueError("Файл скачан не полностью")
             partial.rename(target)

@@ -19,7 +19,8 @@ import java.net.*;
 import java.util.*;
 
 public class MainActivity extends Activity {
-    static final int BLACK=0xff030303, PANEL=0xff171717, YELLOW=0xffffd76b, WHITE=0xfff4f4f4, MUTED=0xffa5a5a5;
+    static final int BLACK=CameraDesign.BLACK,PANEL=CameraDesign.PANEL,YELLOW=CameraDesign.ACCENT,WHITE=CameraDesign.TEXT,MUTED=CameraDesign.MUTED;
+    View secondaryControls;boolean cleanMonitor;Button cleanButton;
     final Handler ui=new Handler(Looper.getMainLooper());
     TextView state,telemetry,notice,center,code,fingerprint;
     ImageView preview;
@@ -34,18 +35,21 @@ public class MainActivity extends Activity {
     CheckBox localPreview,eco;
     boolean resumed,commandPending,showPreview=true;
     Bitmap displayedFrame;
+    LocalPreview localDisplay;
+    long displayEpoch;int displayCount;
+    int localRotation;
     TextView connection;
     long sequence=-1;
     OrientationEventListener orientation;
     AlertDialog pairing,qualitySheet;
     Button videoControl,rateControl,photoControl,photoSizeControl;
     final Runnable refresh=new Runnable(){public void run(){update();UpdateClient.check(MainActivity.this,false);ui.postDelayed(this,500);}};
-    final Runnable frames=new Runnable(){public void run(){renderPreview();ui.postDelayed(this,100);}};
+    final Runnable frames=new Runnable(){public void run(){renderPreview();ui.postDelayed(this,500);}};
 
     int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     GradientDrawable panel(int fill,int stroke,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(radius));d.setStroke(dp(1),stroke);return d;}
     TextView text(String value,int size,int color){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(color);t.setPadding(dp(6),dp(6),dp(6),dp(6));return t;}
-    void buttonStyle(Button b,boolean primary){b.setTextColor(primary?BLACK:YELLOW);b.setBackground(panel(primary?YELLOW:PANEL,primary?YELLOW:0xff424242,14));b.setAlpha(b.isEnabled()?1f:0.4f);}
+    void buttonStyle(Button b,boolean primary){if(!(b instanceof CameraDesign.Shutter))CameraDesign.button(b,primary);}
     Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setTextSize(13);b.setAllCaps(false);b.setMaxLines(1);b.setHorizontallyScrolling(false);b.setAutoSizeTextTypeUniformWithConfiguration(10,13,1,android.util.TypedValue.COMPLEX_UNIT_SP);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),dp(6),dp(8),dp(6));buttonStyle(b,false);b.setOnClickListener(v->action.run());return b;}
     LinearLayout column(){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);return c;}
     LinearLayout row(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setGravity(Gravity.CENTER_VERTICAL);return r;}
@@ -70,32 +74,42 @@ public class MainActivity extends Activity {
             v.setPadding(left,top,right,bottom);return insets;
         });
         FrameLayout finder=new FrameLayout(this);FrameLayout.LayoutParams finderLayout=new FrameLayout.LayoutParams(-1,-1);if(landscape)finderLayout.rightMargin=dp(250);root.addView(finder,finderLayout);
+        localDisplay=new LocalPreview((bitmap,rotation,conversion,received)->{
+            CameraEngine e=engine();if(e==null||!resumed||!showPreview||e.nativePreview)return;
+            displayedFrame=bitmap;localRotation=rotation;preview.setImageBitmap(bitmap);preview.setVisibility(View.VISIBLE);
+            preview.post(()->transformLocalPreview(bitmap,rotation));trackingOverlay.invalidate();center.setVisibility(View.GONE);
+            long now=SystemClock.elapsedRealtime();displayCount++;
+            if(now-displayEpoch>=1000){e.localDisplayFps=displayCount*1000.0/(now-displayEpoch);displayEpoch=now;displayCount=0;}
+            e.localConversionMs=conversion;e.localHandoffMs=(SystemClock.elapsedRealtimeNanos()-received)/1e6;
+        });
         nativeView=new TextureView(this);nativeView.setOpaque(false);finder.addView(nativeView,new FrameLayout.LayoutParams(-1,-1));
         nativeView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){attachPreview();}
             public void onSurfaceTextureSizeChanged(SurfaceTexture t,int w,int h){transformPreview();}
             public boolean onSurfaceTextureDestroyed(SurfaceTexture t){if(attachedEngine!=null&&attachedTexture==t&&!attachedEngine.closed){attachedEngine.detachLocal(t);attachedEngine=null;attachedTexture=null;return false;}return true;}
-            public void onSurfaceTextureUpdated(SurfaceTexture t){}
+            public void onSurfaceTextureUpdated(SurfaceTexture t){trackingOverlay.postInvalidateOnAnimation();}
         });
         preview=new ImageView(this);preview.setBackgroundColor(BLACK);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);finder.addView(preview,new FrameLayout.LayoutParams(-1,-1));
         center=text("Ваша камера. Ваш кадр.\nНажмите «Включить»",17,MUTED);center.setGravity(Gravity.CENTER);finder.addView(center,new FrameLayout.LayoutParams(-1,-1));
         trackingOverlay=new TrackingOverlay(this);finder.addView(trackingOverlay,new FrameLayout.LayoutParams(-1,-1));
-        LinearLayout top=column();top.setPadding(dp(16),dp(8),dp(16),dp(8));top.setBackground(panel(0xc0060606,0x22444444,22));
-        LinearLayout header=row();TextView brand=text("GLIDE",16,YELLOW);brand.setLetterSpacing(.17f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(112),dp(44)));
-        Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(116),dp(44));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
+        LinearLayout top=column();top.setPadding(dp(16),dp(8),dp(16),dp(8));top.setBackground(panel(0xe6080a0c,0x00000000,0));
+        LinearLayout header=row();TextView brand=text("CAMERA DECK",12,WHITE);brand.setLetterSpacing(.10f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(88),dp(38)));
+        Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(102),dp(38));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
         connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setOnClickListener(v->pairingSettings());top.addView(connection);
         state=text("Камера выключена",11,YELLOW);top.addView(state);if(landscape){connection.setVisibility(View.GONE);state.setVisibility(View.GONE);}FrameLayout.LayoutParams topLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);if(landscape)topLayout.rightMargin=dp(250);root.addView(top,topLayout);
-        LinearLayout bottom=column();bottom.setPadding(dp(14),dp(8),dp(14),dp(12));bottom.setBackground(panel(0xd5060606,0x22555555,24));
+        LinearLayout bottom=column();bottom.setPadding(dp(14),dp(8),dp(14),dp(12));bottom.setBackground(panel(0xed080a0c,0x00000000,0));
         storage=text("",11,MUTED);storage.setOnClickListener(v->storageSettings());bottom.addView(storage);
         notice=text("",11,MUTED);notice.setMaxLines(2);bottom.addView(notice);
         LinearLayout controls=row();mode=button("Фото",()->{CameraEngine e=engine();if(e!=null)command("capture_config","mode",e.captureMode.equals("photo")?"video":"photo");});
-        shutter=button("●",()->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});shutter.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE);shutter.setTextSize(22);
-        cell(controls,mode,52);cell(controls,shutter,60);cell(controls,button("Объектив",this::lensSettings),52);bottom.addView(controls);
+        shutter=new CameraDesign.Shutter(this);shutter.setOnClickListener(v->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});
+        cell(controls,mode,44);cell(controls,shutter,68);cell(controls,button("Объектив",this::lensSettings),44);bottom.addView(controls);
         LinearLayout menus=landscape?column():row();formatReadout=button("Качество ▴",this::captureSettings);
         for(Button menu:new Button[]{formatReadout,button("Экспозиция ▴",this::sensorSettings),button("Ещё ▴",this::powerSettings)}){
-            if(landscape){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(44));p.setMargins(dp(3),dp(3),dp(3),dp(3));menus.addView(menu,p);}else cell(menus,menu,44);
-        }bottom.addView(menus);
+            if(landscape){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(44));p.setMargins(dp(3),dp(3),dp(3),dp(3));menus.addView(menu,p);}else cell(menus,menu,38);
+        }bottom.addView(menus);secondaryControls=menus;
+        cleanButton=button("Чистый кадр",()->{cleanMonitor=!cleanMonitor;secondaryControls.setVisibility(cleanMonitor?View.GONE:View.VISIBLE);storage.setVisibility(cleanMonitor?View.GONE:View.VISIBLE);telemetry.setVisibility(cleanMonitor?View.GONE:View.VISIBLE);connection.setVisibility(cleanMonitor?View.GONE:View.VISIBLE);cleanButton.setText(cleanMonitor?"Показать управление":"Чистый кадр");});
+        bottom.addView(cleanButton,new LinearLayout.LayoutParams(-1,dp(32)));
         telemetry=text("",11,MUTED);telemetry.setGravity(Gravity.CENTER);bottom.addView(telemetry);root.addView(bottom,new FrameLayout.LayoutParams(landscape?dp(250):-1,-2,landscape?(Gravity.RIGHT|Gravity.CENTER_VERTICAL):Gravity.BOTTOM));
         isoReadout=button("",this::sensorSettings);shutterReadout=button("",this::sensorSettings);
         localPreview=check("Показывать камеру",true);localPreview.setOnCheckedChangeListener((v,value)->{showPreview=value;CameraEngine e=engine();if(!value&&e!=null)e.hideLocal();sequence=-1;});
@@ -279,12 +293,12 @@ public class MainActivity extends Activity {
         if(!active){preview.setVisibility(View.VISIBLE);storage.setText("Память телефона · "+android.text.format.Formatter.formatFileSize(this,getExternalFilesDir(null).getUsableSpace())+" свободно");connection.setText("Включите камеру — изображение и PIN появятся здесь");state.setText("Камера выключена");telemetry.setText("ISO —     S —     AF");center.setText("Камера готова к работе\nНажмите «Включить» и разрешите доступ");center.setVisibility(View.VISIBLE);preview.setImageDrawable(null);sequence=-1;notice.setText(CameraService.lastStartupError.isEmpty()?"Оригиналы сохраняются на телефоне":CameraService.lastStartupError);if(code!=null)code.setText("Камера выключена");return;}
         if(System.currentTimeMillis()>s.pinExpires)s.rotatePin();
         connection.setText(s.tokens.isEmpty()?"Подключить к компьютеру  ·  PIN "+s.pin+"\n"+getSharedPreferences("deck",0).getString("name",Build.MODEL):"Подключено компьютеров: "+s.tokens.size()+"  ·  Настройки подключения");
-        state.setText((e.captureMode.equals("video")?"MOVIE":"PHOTO")+"  /  "+(e.recording?"● REC":e.powerState.equals("standby")?"STBY":"LIVE")+"  /  "+s.tokens.size()+" LINK");state.setTextColor(e.recording?0xffff5a52:YELLOW);
+        long elapsed=e.recording?(SystemClock.elapsedRealtime()-e.recordingStartedMs)/1000:0;
+        state.setText(e.recording?String.format(Locale.US,"● ЗАПИСЬ  %02d:%02d",elapsed/60,elapsed%60):e.ready?"Готово к съёмке":"Подготовка камеры");state.setTextColor(e.recording?CameraDesign.RECORD:MUTED);
         telemetry.setText("ISO "+(e.measuredIso>0?e.measuredIso:"—")+"    S "+shutterValue(e.measuredExposure)+"    "+(e.focus<0?"AF-C":"MF"));
         isoReadout.setText("ISO  "+(e.measuredIso>0?e.measuredIso:"—"));shutterReadout.setText("S  "+shutterValue(e.measuredExposure));formatReadout.setText((e.captureMode.equals("video")?e.videoHeight+"p · "+e.videoFps+" fps":e.photoFormat.toUpperCase(Locale.US))+" ▴");
-        mode.setText(e.captureMode.equals("video")?"Видео":"Фото");shutter.setText(e.captureMode.equals("photo")?"◎":e.recording?"■":"●");buttonStyle(mode,false);buttonStyle(shutter,!e.recording);
-        if(e.recording){shutter.setBackground(panel(0xffa62520,0xffed554b,2));shutter.setTextColor(WHITE);}
-        center.setVisibility(showPreview&&(e.nativePreview||e.frame.length>0)?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
+        mode.setText(e.captureMode.equals("video")?"Видео":"Фото");buttonStyle(mode,false);((CameraDesign.Shutter)shutter).state(e.captureMode.equals("photo"),e.recording);
+        center.setVisibility(showPreview&&(e.nativePreview||displayedFrame!=null)?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
         String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:(!UpdateClient.message.isEmpty()&&new File(getFilesDir(),"update.apk").isFile())?UpdateClient.message:(e.captureMode.equals("video")?e.videoWidth+" × "+e.videoHeight+" · "+e.videoFps+" fps · "+(e.sound?"Со звуком":"Без звука"):e.photoFormat.toUpperCase(Locale.US)+" · "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)));
         if(SystemClock.elapsedRealtime()>nextStorageRefresh){nextStorageRefresh=SystemClock.elapsedRealtime()+3000;new Thread(()->{long free=e.store.freeBytes(),phone=e.mediaDir.getUsableSpace();String label=e.store.label();ui.post(()->storage.setText(label+" · "+(free>=0?android.text.format.Formatter.formatFileSize(this,free)+" свободно":"объём недоступен")+(e.store.tree()!=null?"  /  телефон: "+android.text.format.Formatter.formatFileSize(this,phone):"")));},"CameraDeck-storage-status").start();}
         if(qualitySheet!=null&&qualitySheet.isShowing()){
@@ -299,13 +313,21 @@ public class MainActivity extends Activity {
         e.demandLocal();attachPreview();transformPreview();trackingOverlay.invalidate();
         preview.setVisibility(e.nativePreview?View.GONE:View.VISIBLE);
         if(e.nativePreview)return;
-        if(showPreview&&e.frameSequence!=sequence){sequence=e.frameSequence;byte[] bytes=e.frame;Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(bitmap!=null){Matrix matrix=new Matrix();matrix.postRotate(e.rotation);
-            if(e.characteristics!=null&&Integer.valueOf(android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)))matrix.postScale(-1,1);
-            Bitmap next=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),bitmap.getHeight(),matrix,true);preview.setImageBitmap(next);
-            displayedFrame=next;if(bitmap!=next)bitmap.recycle();}}
+        e.localDisplay=localDisplay;
+    }
+    void transformLocalPreview(Bitmap bitmap,int rotation){
+        if(preview.getWidth()==0||preview.getHeight()==0)return;
+        float w=bitmap.getWidth(),h=bitmap.getHeight();Matrix matrix=new Matrix();
+        matrix.postTranslate(-w/2,-h/2);matrix.postRotate(rotation);
+        CameraEngine e=engine();boolean front=e!=null&&e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));
+        if(front)matrix.postScale(-1,1);
+        float rw=rotation%180==0?w:h,rh=rotation%180==0?h:w,scale=Math.min(preview.getWidth()/rw,preview.getHeight()/rh);
+        matrix.postScale(scale,scale);matrix.postTranslate(preview.getWidth()/2f,preview.getHeight()/2f);
+        preview.setScaleType(ImageView.ScaleType.MATRIX);preview.setImageMatrix(matrix);
     }
     String localAddresses(){List<String> ips=new ArrayList<>();try{for(NetworkInterface n:Collections.list(NetworkInterface.getNetworkInterfaces()))for(InetAddress a:Collections.list(n.getInetAddresses()))if(a instanceof Inet4Address&&a.isSiteLocalAddress())ips.add(a.getHostAddress());}catch(Exception ignored){}return String.join(", ",ips);}
     void installUpdate(){CameraEngine e=engine();if(e!=null&&(e.recording||e.photoPending))return;if(!getPackageManager().canRequestPackageInstalls()){startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));return;}stopService(new Intent(this,CameraService.class));Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+getPackageName()+".updates/update.apk"),"application/vnd.android.package-archive");intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(intent);}
-    @Override protected void onResume(){super.onResume();resumed=true;UpdateClient.check(this,false);orientation.enable();ui.post(refresh);ui.post(frames);}
-    @Override protected void onPause(){resumed=false;CameraEngine e=engine();if(e!=null)e.hideLocal();ui.removeCallbacks(refresh);ui.removeCallbacks(frames);orientation.disable();super.onPause();}
+    @Override protected void onResume(){super.onResume();resumed=true;displayEpoch=SystemClock.elapsedRealtime();localDisplay.active(true);UpdateClient.check(this,false);orientation.enable();ui.post(refresh);ui.post(frames);}
+    @Override protected void onPause(){resumed=false;CameraEngine e=engine();if(e!=null){e.hideLocal();if(e.localDisplay==localDisplay)e.localDisplay=null;}localDisplay.active(false);ui.removeCallbacks(refresh);ui.removeCallbacks(frames);orientation.disable();super.onPause();}
+    @Override protected void onDestroy(){if(localDisplay!=null)localDisplay.close();super.onDestroy();}
 }

@@ -119,6 +119,14 @@ class CameraTile(QWidget):
         self.worker.start()
         self.display_timer=QTimer(self);self.display_timer.timeout.connect(self.display_latest);self.display_timer.start(16)
         self.video.mouseDoubleClickEvent=lambda event:self.open_fullscreen()
+        self.details=[]
+        for row in (readings,controls,switches):
+            for i in range(row.count()):
+                widget=row.itemAt(i).widget()
+                if widget:widget.hide();self.details.append(widget)
+        self.group.hide()
+        rail=QHBoxLayout();select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
+        self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:self.record.click());rail.addWidget(self.quick_record);box.addLayout(rail)
 
     def framing_settings(self):
         s=self.status;dialog=GlassSheet(self.window);dialog.setWindowTitle("Композиция и просмотр");form=QFormLayout(dialog)
@@ -266,6 +274,9 @@ class CameraTile(QWidget):
 
     def show_status(self, status):
         self.status = status
+        if hasattr(self,'quick_record'):
+            self.quick_record.setText('■ Стоп' if status.get('recording') else '● Запись')
+            self.quick_record.setEnabled(bool(status.get('ready')) and status.get('mode')=='video')
         self.failures = 0
         recording = status.get("recording", False)
         self.video.set_status(status)
@@ -443,6 +454,7 @@ class CameraTile(QWidget):
             self.window.run(apply,lambda _:self.info.setText("Настройки приняты; ожидаем подтверждение камеры…"))
 
     def media(self):
+        self.window.studio.select(self);self.window.studio.navigate(3);return
         def choose(data):
             files = data.get("files", [])
             if not files:
@@ -469,67 +481,22 @@ class Window(QMainWindow):
         self.scanning=False
         self.reconnecting=set()
         self.setStyleSheet(THEME)
-        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(24,22,24,18);layout.setSpacing(16)
-        brand=QHBoxLayout()
-        title = QLabel("Camera Deck Glide"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
-        subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#a5a5a5");brand.addWidget(subtitle);brand.addStretch()
-        self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#ffd76b");brand.addWidget(self.connection_count)
-        self.devices_button=QPushButton("Устройства");self.devices_button.setCheckable(True);self.devices_button.setChecked(True)
-        self.devices_button.clicked.connect(lambda checked:self.sidebar.setVisible(checked));brand.addWidget(self.devices_button)
-        layout.addLayout(brand)
-        bar = QHBoxLayout()
-        self.device_list = QComboBox(); self.device_list.setMinimumWidth(200); self.device_list.setPlaceholderText("Выберите телефон")
-        self.scan = QPushButton("Найти телефоны"); self.scan.clicked.connect(self.scan_devices)
-        connect = QPushButton("Подключить");connect.setObjectName("primary"); connect.clicked.connect(self.connect_device)
-        manual = QPushButton("По IP"); manual.clicked.connect(self.manual)
-        self.filter = QComboBox(); self.filter.addItem("Все группы"); self.filter.currentTextChanged.connect(self.rebuild)
-        self.columns = QComboBox(); self.columns.addItems(["1 колонка", "2 колонки", "3 колонки"]); self.columns.setCurrentIndex(1); self.columns.currentIndexChanged.connect(self.rebuild)
-        for widget in (self.scan,self.device_list,connect,manual,self.filter,self.columns): bar.addWidget(widget)
-        layout.addLayout(bar)
-        self.hint = QLabel("Включите камеру в Android-приложении. Телефон и компьютер должны быть в одной сети.")
-        self.hint.setWordWrap(True); layout.addWidget(self.hint)
-        self.hint.setStyleSheet("color:#828282;font-size:11px")
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        self.grid_widget = QWidget(); self.grid_widget.setObjectName("cameraGrid"); self.grid = QGridLayout(self.grid_widget);self.grid.setContentsMargins(0,0,0,0);self.grid.setSpacing(10); self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
-        scroll.setWidget(self.grid_widget)
-        body=QHBoxLayout();body.setSpacing(18)
-        self.sidebar=QFrame();self.sidebar.setObjectName("tile");self.sidebar.setFixedWidth(270);side=QVBoxLayout(self.sidebar);side.setContentsMargins(16,18,16,18)
-        heading=QLabel("ТЕЛЕФОНЫ РЯДОМ");heading.setStyleSheet("color:#ffd76b;font-size:11px;letter-spacing:2px");side.addWidget(heading)
-        self.device_cards=QWidget();self.device_cards_layout=QVBoxLayout(self.device_cards);self.device_cards_layout.setContentsMargins(0,8,0,8)
-        self.device_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop);side.addWidget(self.device_cards,1)
-        side.addWidget(QLabel("Откройте камеру на телефоне.\nПодключитесь к общей Wi-Fi сети."))
-        body.addWidget(self.sidebar);body.addWidget(scroll,1);layout.addLayout(body,1)
+        from studio import Studio
+        self.studio=Studio(self);self.setCentralWidget(self.studio)
         menu=self.menuBar()
         devices_menu=menu.addMenu("Устройства");devices_menu.addAction("Найти телефоны",self.scan_devices);devices_menu.addAction("Подключиться по IP",self.manual);devices_menu.addAction("Доверенные телефоны",self.trusted_devices)
         view_menu=menu.addMenu("Вид");view_menu.addAction("Показать / скрыть телефоны",lambda:self.devices_button.click())
-        for n in range(1,4):view_menu.addAction(f"{n} колонка",lambda checked=False,n=n:self.columns.setCurrentIndex(n-1))
-        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True));system_menu.addAction("О программе",lambda:self.message("Camera Deck Glide","H.264 через защищённое соединение · зум и композиция · доверенные устройства.\nЗапись сохраняется на телефоне в исходном качестве."))
+        for i,title in enumerate(("Монитор","Камера","Продакшн","Материалы")):view_menu.addAction(title,lambda checked=False,n=i:self.studio.navigate(n))
+        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True))
         self.refresh_devices()
-        self.empty = QLabel("<span style='font-size:34px;color:#f4f4f4'>Ваша камера. Больше возможностей.</span><br><br>"
-            "Подключите Android-телефон любой марки<br><br>"
-            "<span style='color:#b9c8df'>1 · Откройте Camera Deck на телефоне и включите камеру<br>"
-            "2 · Подключите оба устройства к одной Wi-Fi сети<br>"
-            "3 · Нажмите «Найти телефоны» и введите PIN</span><br><br>"
-            "<span style='font-size:12px'>Android 9+ · Возможности съёмки определяются камерой телефона<br>"
-            "Телефон не найден? Подключитесь по IP из раздела «Подключить» на телефоне.</span>")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:15px;color:#a5a5a5;line-height:1.6;background:#111b29;border:1px solid #29394f;border-radius:24px;padding:30px")
-        self.grid.addWidget(self.empty,0,0)
-        bottom = QHBoxLayout()
-        self.auto = Toggle("Автообновления")
-        self.auto.setChecked(self.load_preferences().get("autoUpdates", True))
-        self.auto.toggled.connect(self.save_preferences)
-        self.update_label = QLabel("v"+updates.VERSION+" · обновления проверяются автоматически")
-        self.update_label.setWordWrap(True)
-        check = QPushButton("Проверить обновления"); check.clicked.connect(lambda: self.check_update(True))
-        self.install_button = QPushButton("Обновить Windows"); self.install_button.setEnabled(False); self.install_button.clicked.connect(self.install_windows)
-        bottom.addWidget(self.auto); bottom.addWidget(self.update_label);bottom.addStretch()
-        for widget in (check,self.install_button): bottom.addWidget(widget)
-        layout.addLayout(bottom)
-        self.timer = QTimer(self); self.timer.timeout.connect(lambda: self.check_update() if self.auto.isChecked() else None); self.timer.start(3600000)
+        self.timer=QTimer(self);self.timer.timeout.connect(lambda:self.check_update() if self.auto.isChecked() else None);self.timer.start(3600000)
         self.discovery_timer=QTimer(self);self.discovery_timer.timeout.connect(lambda:self.scan_devices() if self.sidebar.isVisible() else None)
-        if auto_checks:self.discovery_timer.start(8000)
-        if auto_checks: QTimer.singleShot(300, self.scan_devices)
-        if auto_checks: QTimer.singleShot(1200, lambda: self.check_update() if self.auto.isChecked() else None)
+        if auto_checks:self.discovery_timer.start(8000);QTimer.singleShot(300,self.scan_devices);QTimer.singleShot(1200,lambda:self.check_update() if self.auto.isChecked() else None)
+        preferences=self.load_preferences()
+        if preferences.get('geometry'):
+            from PyQt6.QtCore import QByteArray
+            self.restoreGeometry(QByteArray.fromBase64(preferences['geometry'].encode()))
+        self.columns.setCurrentIndex(max(0,min(2,preferences.get('columns',1))))
 
     def load_preferences(self):
         try: return json.loads((updates.DATA/"preferences.json").read_text())
@@ -537,7 +504,7 @@ class Window(QMainWindow):
 
     def save_preferences(self):
         updates.DATA.mkdir(parents=True,exist_ok=True)
-        (updates.DATA/"preferences.json").write_text(json.dumps({"autoUpdates":self.auto.isChecked()}))
+        (updates.DATA/"preferences.json").write_text(json.dumps({"autoUpdates":self.auto.isChecked(),"geometry":bytes(self.saveGeometry().toBase64()).decode(),"columns":self.columns.currentIndex()}))
 
     def run(self, function, callback=lambda _: None, failure=None):
         signal = Result(); self.jobs.append(signal)
@@ -555,7 +522,9 @@ class Window(QMainWindow):
             else: signal.done.emit(value)
         threading.Thread(target=work,daemon=True).start()
 
-    def message(self, title, body): QMessageBox.information(self,title,body)
+    def message(self, title, body):
+        from errors import show_message
+        show_message(self,title,body)
 
     def scan_devices(self):
         if self.scanning:return
@@ -669,6 +638,7 @@ class Window(QMainWindow):
 
     def rebuild(self):
         self.refresh_devices()
+        if hasattr(self,"studio"):self.studio.refresh()
         self.connection_count.setText(f"Камер: {len(self.tiles)}" if self.tiles else "Нет подключённых камер")
         current = self.filter.currentText()
         groups = sorted({tile.group.text().strip() or "Общая" for tile in self.tiles})
@@ -680,7 +650,7 @@ class Window(QMainWindow):
         for tile in self.tiles:
             visible = self.filter.currentText() == "Все группы" or self.filter.currentText() == (tile.group.text().strip() or "Общая")
             tile.setVisible(visible)
-            tile.set_preview_active(visible and not self.isMinimized())
+            tile.set_preview_active(visible and not self.isMinimized() and (not hasattr(self,"studio") or self.studio.workspace<2))
             if visible: self.grid.addWidget(tile,index//columns,index%columns); index += 1
 
     def check_update(self,manual=False):
@@ -734,6 +704,8 @@ class Window(QMainWindow):
                 meta=self.available[updates.windows_platform()];candidate=updates.DATA/'updates'/str(self.available['code'])/meta['name']
                 if candidate.is_file():updates.restart_with_update(candidate,self.available)
             except Exception as exc:self.message("Обновление",str(exc))
+        self.save_preferences()
+        if hasattr(self,"studio"):self.studio.media.player.stop()
         for tile in self.tiles: tile.stopped.set();tile.monitor.stop()
         event.accept()
 
