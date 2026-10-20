@@ -39,7 +39,7 @@ public class MainActivity extends Activity {
     OrientationEventListener orientation;
     AlertDialog pairing,qualitySheet;
     Button videoControl,rateControl,photoControl,photoSizeControl;
-    final Runnable refresh=new Runnable(){public void run(){update();ui.postDelayed(this,500);}};
+    final Runnable refresh=new Runnable(){public void run(){update();UpdateClient.check(MainActivity.this,false);ui.postDelayed(this,500);}};
     final Runnable frames=new Runnable(){public void run(){renderPreview();ui.postDelayed(this,100);}};
 
     int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}

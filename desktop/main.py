@@ -45,6 +45,7 @@ class CameraTile(QWidget):
         self.failures = 0
         self.fullscreen=None
         self.frame_lock=threading.Lock();self.pending_frame=None
+        self.display_count=0;self.display_epoch=time.monotonic();self.measured_fps=0;self.transport="—"
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("tile")
         box = QVBoxLayout(self);box.setContentsMargins(10,8,10,8);box.setSpacing(7)
@@ -162,6 +163,9 @@ class CameraTile(QWidget):
     def display_latest(self):
         with self.frame_lock:pending=self.pending_frame;self.pending_frame=None
         if pending is None:return
+        self.display_count+=1;elapsed=time.monotonic()-self.display_epoch
+        if elapsed>=1:self.measured_fps=self.display_count/elapsed;self.display_count=0;self.display_epoch=time.monotonic()
+        self.status['viewFps']=round(self.measured_fps);self.status['transport']=self.transport
         image,rotation=pending
         if rotation:image=image.transformed(QTransform().rotate(rotation),Qt.TransformationMode.SmoothTransformation)
         self.video.frame_rotation=rotation
@@ -179,10 +183,12 @@ class CameraTile(QWidget):
             if not self.preview_enabled.is_set() or self.paused.is_set():self.stopped.wait(.1);continue
             try:
                 if avc:
+                    self.transport="H.264"
                     for image,rotation in live_video.frames(self.client,self.stopped,self.preview_enabled):
                         if self.paused.is_set():break
                         with self.frame_lock:self.pending_frame=(image,rotation)
                 elif stream_supported:
+                    self.transport="JPEG"
                     for data,rotation in self.client.frames(self.stopped,self.preview_enabled):
                         if self.paused.is_set():break
                         image=QImage.fromData(data)
@@ -240,7 +246,7 @@ class CameraTile(QWidget):
         self.record.setEnabled(status.get("ready", False) and mode=="video")
         self.photo.setEnabled(status.get("ready", False) and not recording and not status.get("photoPending",False) and mode=="photo")
         self.listen.setEnabled(status.get("audioAvailable",False))
-        self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  VIEW ≈640px")
+        self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  {self.transport} {self.measured_fps:.0f} fps")
         free=status.get("storageFreeBytes",-1)
         if free>=0:self.info.setText(f"{status.get('storageName','Телефон')} · {free/1073741824:.1f} ГБ свободно"+("  ·  "+status['error'] if status.get('error') else ""))
         self.info.setToolTip(status.get("lastFile", ""))

@@ -45,7 +45,7 @@ final class UpdateClient {
                     }catch(SecurityException ignored){}
                 }
                 if(selected==null){message=new File(c.getFilesDir(),"update.apk").isFile()?"Обновление готово — откройте меню системы":"Установлена последняя версия";return;}
-                CameraService service=CameraService.active;if(service!=null&&(service.engine.recording||service.engine.photoPending)){message="Обновление доступно. Загрузка после остановки записи.";lastCheck=0;return;}
+                CameraService service=CameraService.active;if(service!=null&&(service.engine.recording||service.engine.photoPending)){message="Обновление доступно. Загрузка после остановки записи.";lastCheck=android.os.SystemClock.elapsedRealtime()-3540000;return;}
                 long expected=selected.getJSONObject("android").getLong("size");if(expected<=0||expected>200_000_000)throw new SecurityException("Недопустимый размер APK");
                 message="Загружаем проверенное обновление…";
                 try(InputStream in=open(asset.getString("browser_download_url"));OutputStream out=new FileOutputStream(temp)){byte[] buffer=new byte[65536];long total=0;int n;while((n=in.read(buffer))!=-1){total+=n;if(total>expected)throw new SecurityException("APK больше ожидаемого");out.write(buffer,0,n);}if(total!=expected)throw new IOException("Неполная загрузка APK");}

@@ -168,7 +168,7 @@ class Viewfinder(QLabel):
         painter.drawText(self.width()-72,19,right)
         painter.setPen(QColor("#ffd76b"));painter.drawText(11,self.height()-10,f"ISO {s.get('iso') or '—'}   {shutter_label(s.get('exposureNs',0))}   {'AF' if s.get('focus',-1)<0 else 'MF'}")
         painter.setPen(QColor("#a0a0a0"))
-        quality=f"VIEW {s.get('previewFps',5)}p"
+        quality=f"{s.get('viewFps',0)} fps"
         painter.drawText(self.width()-90,self.height()-10,quality)
         painter.setPen(QPen(QColor(255,255,255,45),1))
         for x,y,dx,dy in ((12,42,1,1),(self.width()-12,42,-1,1),(12,self.height()-43,1,-1),(self.width()-12,self.height()-43,-1,-1)):

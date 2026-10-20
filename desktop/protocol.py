@@ -7,6 +7,7 @@ import json
 import socket
 import ssl
 import time
+import threading
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -69,6 +70,7 @@ class CameraClient:
         self.host = local_host(host)
         self.fingerprint = fingerprint.replace(" ", "").lower()
         self.token = ""
+        self.refresh_secret="";self.session_lock=threading.Lock()
 
     def connection(self, probe: bool = False) -> http.client.HTTPSConnection:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -126,13 +128,16 @@ class CameraClient:
         finally:conn.close()
 
     def request(self, path: str, method: str = "GET", body: bytes | None = None,
-                extra: dict | None = None, limit: int = MAX_JSON) -> bytes:
+                extra: dict | None = None, limit: int = MAX_JSON, _retried=False) -> bytes:
         conn = self.connection()
         try:
             headers = {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
             headers.update(extra or {})
             conn.request(method, path, body=body, headers=headers)
             response = conn.getresponse()
+            if response.status==401 and self.refresh_secret and path!='/resume' and not _retried:
+                previous=headers['Authorization'][7:];conn.close();self.renew(previous)
+                return self.request(path,method,body,extra,limit,True)
             result = response.read(limit + 1)
             if len(result) > limit:
                 raise ValueError("Ответ телефона слишком большой")
@@ -155,10 +160,15 @@ class CameraClient:
             raise ValueError("PIN состоит из четырёх цифр")
         result = self.json("/pair", {"pin": pin,"remember":remember,"clientName":socket.gethostname()[:60]})
         self.token = result["token"]
+        self.refresh_secret=result.get("rememberToken","")
         return result
 
     def resume(self, secret):
-        result=self.json("/resume",{"rememberToken":secret});self.token=result["token"];return result
+        result=self.json("/resume",{"rememberToken":secret});self.token=result["token"];self.refresh_secret=secret;return result
+
+    def renew(self, previous):
+        with self.session_lock:
+            if self.token==previous:self.resume(self.refresh_secret)
 
     def command(self, action: str, **kwargs) -> dict:
         return self.json("/command", {"action": action, **kwargs})

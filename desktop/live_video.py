@@ -29,8 +29,11 @@ def frames(client,stopped,enabled):
     conn=client.connection()
     try:
         conn.sock.settimeout(4)
-        conn.request('GET','/video',headers={'Authorization':'Bearer '+client.token})
+        token=client.token
+        conn.request('GET','/video',headers={'Authorization':'Bearer '+token})
         response=conn.getresponse()
+        if response.status==401 and getattr(client,'refresh_secret',''):
+            conn.close();client.renew(token);yield from frames(client,stopped,enabled);return
         if response.status in (404,501):raise StreamUnavailable('Совместимый JPEG-просмотр')
         if response.status!=200:raise ConnectionError(f'H.264: HTTP {response.status}')
         if response.getheader('Content-Type','').split(';')[0]!='application/x-cameradeck-avc':raise ValueError('Неверный формат AVC')
