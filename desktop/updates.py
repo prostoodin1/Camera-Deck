@@ -15,9 +15,9 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.7.2"
-VERSION_CODE = 11
-RELEASE_NAME = "Orbit"
+VERSION = "0.8.0"
+VERSION_CODE = 12
+RELEASE_NAME = "Glide"
 PRODUCT = "camera-deck-aurora"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -99,7 +99,10 @@ def verify_envelope(envelope: bytes, public_key: bytes | None = None, current_co
         raise ValueError("Wrong product, protocol or old update")
     if not re.fullmatch(r"\d+\.\d+\.\d+", data.get("version", "")):
         raise ValueError("Invalid version")
-    for platform, extension in (("windows", "exe"), ("android", "apk")):
+    platforms = [("windows", "exe"), ("android", "apk")]
+    if "windowsPortable" in data:
+        platforms.append(("windowsPortable", "zip"))
+    for platform, extension in platforms:
         asset = data[platform]
         if not re.fullmatch(r"[A-Za-z0-9_.-]+\." + extension, asset["name"]) or not re.fullmatch(r"[0-9a-f]{64}", asset["sha256"]):
             raise ValueError("Invalid artifact metadata")
@@ -129,7 +132,7 @@ def check_updates() -> dict | None:
         except Exception:
             # A malformed release must not hide an otherwise valid newer release.
             continue
-        for platform in ("windows", "android"):
+        for platform in ("windows", "android", *(["windowsPortable"] if "windowsPortable" in data else [])):
             meta = data[platform]
             asset = assets.get(meta["name"])
             if not asset or asset["size"] != meta["size"]:
@@ -173,17 +176,68 @@ def download_update(update: dict, platform: str) -> Path:
         temp.unlink(missing_ok=True)
 
 
+def windows_platform() -> str:
+    return "windowsPortable" if getattr(sys, "frozen", False) and Path(getattr(sys, "_MEIPASS", "")).resolve() == Path(sys.executable).resolve().parent / "_internal" else "windows"
+
+
+def extract_portable(candidate: Path, destination: Path) -> Path:
+    import zipfile
+    from pathlib import PurePosixPath
+    with zipfile.ZipFile(candidate) as archive:
+        files = archive.infolist()
+        if sum(item.file_size for item in files) > 1_500_000_000:
+            raise ValueError("Portable archive exceeds size limit")
+        for item in files:
+            parts = PurePosixPath(item.filename).parts
+            if ("\\" in item.filename or ":" in item.filename or ".." in parts or
+                len(parts) < 2 or parts[0] != "CameraDeck-Portable" or
+                parts[1] not in ("CameraDeck-Portable.exe", "_internal") or
+                (item.external_attr >> 16) & 0o170000 == 0o120000):
+                raise ValueError("Unsafe portable archive member")
+        archive.extractall(destination)
+    root = destination / "CameraDeck-Portable"
+    if not (root / "CameraDeck-Portable.exe").is_file() or not (root / "_internal/python313.dll").is_file():
+        raise ValueError("Incomplete portable update")
+    return root
+
+
 def restart_with_update(candidate: Path, update: dict) -> None:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Автоустановка доступна в собранном EXE")
     manifest = verify_envelope(update["envelope"])
-    expected = manifest["windows"]["sha256"]
+    platform = windows_platform()
+    expected = manifest[platform]["sha256"]
     with candidate.open("rb") as stream:
         if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
             raise ValueError("Update hash mismatch")
     def quote(value):
         return "'" + str(value).replace("'", "''") + "'"
     target = Path(sys.executable).resolve()
+    if platform == "windowsPortable":
+        staged = extract_portable(candidate, candidate.parent / "unpacked")
+        backup = candidate.parent / "previous-portable"
+        # Only the executable and bundled runtime are copied; preserve user files.
+        # No recursive removal or moving of the user's application directory.
+        script = f"""$ErrorActionPreference = 'Stop'
+Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue
+$stage = {quote(staged)}
+$target = {quote(target.parent)}
+$backup = {quote(backup)}
+New-Item -ItemType Directory -Path $backup -Force | Out-Null
+Copy-Item -LiteralPath {quote(target)} -Destination (Join-Path $backup 'CameraDeck-Portable.exe') -Force
+Copy-Item -LiteralPath (Join-Path $target '_internal') -Destination $backup -Recurse -Force
+try {{
+    Copy-Item -LiteralPath (Join-Path $stage '_internal') -Destination $target -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $stage 'CameraDeck-Portable.exe') -Destination {quote(target)} -Force
+}} catch {{
+    Copy-Item -LiteralPath (Join-Path $backup '_internal') -Destination $target -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $backup 'CameraDeck-Portable.exe') -Destination {quote(target)} -Force
+    throw
+}}
+Start-Process -FilePath {quote(target)} -WindowStyle Hidden
+"""
+        _launch_updater(script)
+        return
     # Keep the previous executable for recovery; wait for this process to exit.
     script = f"""$ErrorActionPreference = 'Stop'
 Wait-Process -Id {os.getpid()} -ErrorAction SilentlyContinue
@@ -201,8 +255,12 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {{
     }} catch {{ Start-Sleep -Seconds 1 }}
 }}
 if (-not $replaced) {{ throw 'Executable is still locked; previous version retained' }}
-Start-Process -FilePath $target
+Start-Process -FilePath $target -WindowStyle Hidden
 """
+    _launch_updater(script)
+
+
+def _launch_updater(script: str) -> None:
     fd, script_path = tempfile.mkstemp(prefix="camera-deck-update-", suffix=".ps1")
     with os.fdopen(fd, "w", encoding="utf-8-sig") as out:
         out.write(script)

@@ -1,12 +1,12 @@
-# Camera Deck · Orbit
+# Camera Deck · Glide
 
-Android phone cameras controlled from a Windows desk. Release **Orbit**, version **0.7.2 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
+Android phone cameras controlled from a Windows desk. Release **Glide**, version **0.8.0 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
 
-Orbit names this release; Camera Deck is the application. Internal `.aurora` package, cryptographic channel identifiers and keys are retained so updates preserve installed apps, recordings and trusted clients. Future releases use their own names from `version.json`.
+Glide names this release; Camera Deck is the application. Internal `.aurora` package, cryptographic channel identifiers and keys are retained so updates preserve installed apps, recordings and trusted clients. Future releases use their own names from `version.json`.
 
 ## Installation and first connection
 
-Install `CameraDeck-Orbit-Android.apk` over Aurora and run `CameraDeck-Orbit-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
+Install `CameraDeck-Glide-Android.apk` over Aurora and run `CameraDeck-Glide-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
 
 Connect both devices to the same Wi-Fi. On the phone press **Включить**, grant camera/microphone permissions, then open **Подключить**. On Windows choose the discovered phone, compare the entire SHA-256 fingerprint and enter its PIN. Manual local IP entry is available when broadcast discovery is blocked.
 
@@ -24,7 +24,7 @@ This is not WebRTC, and zero delay, 60 fps on every phone, perfect audio/video s
 
 ## Viewer rotation
 
-Each camera has **Повернуть 90°** and **Блок. поворот**, also available fullscreen. Manual rotation is applied to the original decoded frame, including face overlays and tap-to-focus coordinates. Lock freezes automatic orientation while manual rotation remains available. Settings persist per pinned phone identity. Viewer controls do not modify the phone recording. Update Android as well: Orbit fixes the reversed OrientationEventListener sign that inverted landscape streams by 180 degrees.
+Each camera has **Повернуть 90°** and **Блок. поворот**, also available fullscreen. Manual rotation is applied to the original decoded frame, including face overlays and tap-to-focus coordinates. Lock freezes automatic orientation while manual rotation remains available. Settings persist per pinned phone identity. Viewer controls do not modify the phone recording. Update Android as well: Glide fixes the reversed OrientationEventListener sign that inverted landscape streams by 180 degrees.
 
 ## Framing, zoom and focus
 
@@ -77,3 +77,14 @@ These show the 0.6 UI on two local TLS JPEG camera simulators, not physical phon
 ## License
 
 GPL-3.0-only; [LICENSE](LICENSE), [third-party notices](THIRD_PARTY_NOTICES.md). Windows uses GPL PyQt6. PyAV/FFmpeg and Google's ML Kit have their respective upstream notices and terms; dependency versions are pinned.
+
+
+## Glide recording and Windows recovery
+
+Auto zoom now uses a time based acceleration limited motion at 30 updates per second. Face observations update its goal; loss of tracking holds zoom. Photo and video controls are separate; common video sizes are the default and all reported sizes remain selectable.
+
+Recording closes the preview session before allocating the original quality encoder. It uses at most the recording encoder and a YUV preview, without the second H.264 encoder, still image output or native TextureView output. Laptop/phone preview uses compatible JPEG during recording. If the device rejects that combination, a recorder-only session is attempted without silently reducing the selected resolution/FPS; preview can be unavailable in that mode. Actual device validation is still required.
+
+Windows builds explicitly include both Visual C++ runtime DLLs shipped with Python. If the one-file EXE fails to load Python from `_MEI`, download `CameraDeck-Glide-Windows-Portable.zip`, extract the **whole folder**, then run `CameraDeck-Portable.exe` inside it. Keep `_internal` beside the EXE. This avoids temporary extraction. Both distributions use signed updates; portable installations receive a complete runtime ZIP and retain a previous copy for recovery. An older EXE which cannot start needs this one-time manual recovery.
+
+Direct laptop recording in original quality is not implemented in Glide. It requires transporting the recording encoder's video/audio packets with timestamps and muxing on Windows; saving the current preview alone would retain only preview quality.

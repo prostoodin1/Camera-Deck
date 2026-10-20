@@ -44,16 +44,16 @@ final class CameraEngine implements AutoCloseable {
     }
     void attachLocal(android.graphics.SurfaceTexture texture){handler.post(()->{
         if(closed||localOutput!=null&&localOutput.texture==texture)return;
-        if(localOutput!=null){LocalOutput old=localOutput;retiredOutputs.add(old);if(recording&&request!=null&&session!=null)try{request.removeTarget(old.surface);request.addTarget(preview.getSurface());repeat();}catch(Exception e){fail(e);}}
+        if(localOutput!=null){LocalOutput old=localOutput;retiredOutputs.add(old);if(recording&&request!=null&&session!=null)try{request.removeTarget(old.surface);if(!recording||recordPreview)request.addTarget(preview.getSurface());repeat();}catch(Exception e){fail(e);}}
         localOutput=new LocalOutput(texture);localRejected=false;
         if(recording)nativePreview=false;
         if(preview!=null)texture.setDefaultBufferSize(preview.getWidth(),preview.getHeight());
-        if(ready&&!recording&&!photoPending)try{configure(false);}catch(Exception e){fail(e);}
+        if(ready&&!busy&&!recording&&!photoPending)try{configure(false);}catch(Exception e){fail(e);}
     });}
     void detachLocal(android.graphics.SurfaceTexture texture){handler.post(()->{
         if(localOutput==null||localOutput.texture!=texture){texture.release();return;}
         LocalOutput old=localOutput;localOutput=null;nativePreview=false;retiredOutputs.add(old);
-        try{if(ready&&!recording&&!photoPending)configure(false);else if(request!=null&&session!=null){request.removeTarget(old.surface);request.addTarget(preview.getSurface());repeat();}}catch(Exception e){fail(e);}
+        try{if(ready&&!busy&&!recording&&!photoPending)configure(false);else if(request!=null&&session!=null){request.removeTarget(old.surface);if(!recording||recordPreview)request.addTarget(preview.getSurface());repeat();}}catch(Exception e){fail(e);}
     });}
     final AudioEngine audio;
     final java.util.concurrent.ExecutorService photoWriter=java.util.concurrent.Executors.newSingleThreadExecutor();
@@ -97,27 +97,33 @@ final class CameraEngine implements AutoCloseable {
     volatile int liveUsers;
     volatile String liveError="";
     String liveProfile="balanced";
-    boolean liveRejected;
+    boolean liveRejected,recordPreview=true,recoveryAttempted;
+    int configuration;
     final Map<CameraCaptureSession,Runnable> afterSessionClosed=new IdentityHashMap<>();
     final Set<LiveVideo> retiredEncoders=new HashSet<>();
     void beginRecording(boolean canRetry)throws Exception{
-        recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
-        boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
-        try{recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);}
-        catch(Exception failure){
-            recordingTarget.close();recordingTarget=null;
-            if(!canRetry||live==null)throw failure;
-            LiveVideo retired=live;retiredEncoders.add(retired);live=null;liveUsers=0;liveRejected=true;liveError="Для записи кодек переключён с H.264 просмотра на оригинал. Просмотр — JPEG.";
-            ready=false;busy=true;CameraCaptureSession previous=session;session=null;request=null;
-            Runnable retry=()->{retired.close();retiredEncoders.remove(retired);if(closed)return;try{beginRecording(false);}catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}};
-            if(previous!=null){afterSessionClosed.put(previous,retry);try{previous.stopRepeating();previous.abortCaptures();}catch(Exception ignored){}previous.close();}else retry.run();
-            return;
-        }
-        try{configure(true);}catch(Exception e){releaseRecorder();throw e;}
+        // Release the preview codec and camera surfaces before allocating the recorder.
+        ready=false;busy=true;recordPreview=true;recoveryAttempted=false;
+        final LiveVideo retired=live;live=null;liveUsers=0;
+        if(retired!=null){retired.closed=true;retiredEncoders.add(retired);}
+        liveRejected=true;liveError="Recording uses compatible JPEG preview";
+        CameraCaptureSession previous=session;session=null;request=null;
+        Runnable start=()->{
+            if(retired!=null){retired.close();retiredEncoders.remove(retired);}
+            if(closed)return;
+            try{
+                recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
+                boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
+                recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);
+                configure(true);
+            }catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}
+        };
+        if(previous!=null){afterSessionClosed.put(previous,start);try{previous.stopRepeating();previous.abortCaptures();}catch(Exception ignored){}previous.close();}
+        else start.run();
     }
     synchronized LiveVideo subscribeVideo()throws Exception{
         FutureTask<LiveVideo> task=new FutureTask<>(()->{
-            if(!ready||photoPending||busy)throw new IllegalStateException("Камера занята");
+            if(!ready||photoPending||busy||recording)throw new IllegalStateException("Камера занята");
             if(liveRejected)throw new IllegalStateException("Камера использует совместимый просмотр");
             if(live==null){
                 JSONObject best=null;int bestRate=0;double score=Double.MAX_VALUE;
@@ -149,16 +155,29 @@ final class CameraEngine implements AutoCloseable {
     volatile JSONArray faces=new JSONArray();volatile long facesAt;
     volatile int afState;
     volatile float[] focusPoint;
+    final ZoomMotion zoomMotion=new ZoomMotion();
+    final Runnable zoomTick=new Runnable(){public void run(){
+        if(closed)return;
+        long now=SystemClock.elapsedRealtime();
+        if(autoZoom&&tracking&&ready&&!busy&&!photoPending&&request!=null){
+            float next=Math.max(minZoom,Math.min(maxZoom,zoomMotion.step(now)));
+            if(Math.abs(next-zoom)>.0002f){zoom=next;try{settings(request);applyDemand(true);}catch(Exception e){fail(e);}}
+        }else zoomMotion.reset(zoom,now);
+        handler.postDelayed(this,33);
+    }};
     final FaceTracker tracker=new FaceTracker();
     android.view.OrientationEventListener orientation;
     boolean trackingNeeded(){return tracking&&power.preview(SystemClock.elapsedRealtime());}
     void trackFace(float height,float[] point){
         if(!ready||busy||photoPending||closed||!tracking)return;
         boolean changed=false;
-        if(autoZoom&&point!=null){float next=Framing.smooth(zoom,height,framing,minZoom,maxZoom);
+        if(point==null)zoomMotion.reset(zoom,SystemClock.elapsedRealtime());
+        if(autoZoom&&point!=null&&height>.015f){
+            float desired=Math.max(minZoom,Math.min(maxZoom,zoom*Framing.target(framing)/height));
             float edge=Math.max(Math.abs(point[0]-.5f)+point[2],Math.abs(point[1]-.5f)+point[3]);
-            if(edge>0)next=Math.max(minZoom,Math.min(maxZoom,Math.max(zoom*.95f,Math.min(next,zoom*.46f/edge))));
-            if(Math.abs(next-zoom)>.005f){zoom=next;changed=true;}}
+            if(edge>0)desired=Math.max(minZoom,Math.min(desired,zoom*.46f/edge));
+            zoomMotion.observe(desired,SystemClock.elapsedRealtime());
+        }
         if(faceFocus&&focus<0&&point!=null&&(focusPoint==null||Math.abs(focusPoint[0]-point[0])+Math.abs(focusPoint[1]-point[1])>.03f)){focusPoint=point;changed=true;}
         if(changed)try{settings(request);applyDemand(true);}catch(Exception e){fail(e);}
     }
@@ -193,6 +212,7 @@ final class CameraEngine implements AutoCloseable {
         handler.post(() -> { try { open(cameraId); } catch (Exception e) { fail(e); } });
         orientation=new android.view.OrientationEventListener(c){public void onOrientationChanged(int degrees){if(degrees<0||characteristics==null)return;deviceRotation=((degrees+45)/90*90)%360;Integer sensor=characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);boolean front=Integer.valueOf(0).equals(characteristics.get(CameraCharacteristics.LENS_FACING));rotation=Framing.cameraRotation(sensor==null?90:sensor,deviceRotation,front);}};orientation.enable();
         handler.postDelayed(powerTick, 1000);
+        zoomMotion.reset(zoom,SystemClock.elapsedRealtime());handler.post(zoomTick);
     }
 
     void demandRemote() { power.remote(SystemClock.elapsedRealtime()); handler.post(() -> { try { applyDemand(false); } catch (Exception e) { fail(e); } }); }
@@ -209,9 +229,9 @@ final class CameraEngine implements AutoCloseable {
         if (plan == PowerPolicy.Plan.STANDBY) {
             session.stopRepeating(); frame = new byte[0];
         } else {
-            request.removeTarget(preview.getSurface());
+            if(!recording||recordPreview)request.removeTarget(preview.getSurface());
             // Local hardware preview does not need CPU JPEG conversion.
-            if ((plan==PowerPolicy.Plan.PREVIEW||plan==PowerPolicy.Plan.RECORD_PREVIEW)&&(liveUsers==0&&power.remotePreview(SystemClock.elapsedRealtime()) || !nativePreview || trackingNeeded())) request.addTarget(preview.getSurface());
+            if ((!recording||recordPreview)&&(plan==PowerPolicy.Plan.PREVIEW||plan==PowerPolicy.Plan.RECORD_PREVIEW)&&(liveUsers==0&&power.remotePreview(SystemClock.elapsedRealtime()) || !nativePreview || trackingNeeded())) request.addTarget(preview.getSurface());
             if(live!=null&&!liveRejected){request.removeTarget(live.surface);if(liveUsers>0)request.addTarget(live.surface);}
             if(nativePreview&&localOutput!=null){request.removeTarget(localOutput.surface);if(power.localPreview(SystemClock.elapsedRealtime()))request.addTarget(localOutput.surface);}
             // The recorder surface remains targeted when only preview is paused.
@@ -291,8 +311,13 @@ final class CameraEngine implements AutoCloseable {
         createPhotoReader();
         manager.openCamera(id, new CameraDevice.StateCallback() {
             public void onOpened(CameraDevice device) { if (closed) { device.close(); return; } camera = device; try { configure(false); } catch (Exception e) { fail(e); busy = false; } }
-            public void onDisconnected(CameraDevice device) { device.close(); ready = false; busy = false; error = "Camera disconnected"; }
-            public void onError(CameraDevice device, int code) { device.close(); ready = false; busy = false; error = "Camera error " + code; }
+            public void onDisconnected(CameraDevice device) { device.close();if(device!=camera)return;recording=false;releaseRecorder();closeCamera();ready=false;busy=false;error="Camera disconnected"; }
+            public void onError(CameraDevice device, int code) {
+                if(device!=camera){device.close();return;}
+                boolean recover=!recoveryAttempted&&recorder!=null;recoveryAttempted=true;
+                recording=false;releaseRecorder();closeCamera();busy=false;error="Camera error "+code+"; recording could not start. Try another resolution/FPS.";
+                if(recover)handler.postDelayed(()->{if(!closed)try{open(cameraId);}catch(Exception e){fail(e);}},700);
+            }
         }, handler);
     }
 
@@ -331,24 +356,33 @@ final class CameraEngine implements AutoCloseable {
     }
 
     void configure(boolean video) throws Exception {
+        if(!video&&live==null)liveRejected=false;
         ready = false; busy = true;
-        if (session != null) { session.close(); session = null; }
-        List<Surface> surfaces = new ArrayList<>(); surfaces.add(preview.getSurface());
-        surfaces.add(video ? recorder.getSurface() : photos.getSurface());
-        final LiveVideo streaming=liveRejected?null:live;if(streaming!=null)surfaces.add(streaming.surface);
-        final LocalOutput output=localRejected?null:localOutput;
+        if (session != null) {
+            CameraCaptureSession previous=session;session=null;request=null;
+            afterSessionClosed.put(previous,()->{if(!closed)try{configure(video);}catch(Exception e){fail(e);busy=false;releaseRecorder();}});
+            try{previous.stopRepeating();previous.abortCaptures();}catch(Exception ignored){}
+            previous.close();return;
+        }
+        final int generation=++configuration;final CameraDevice device=camera;
+        List<Surface> surfaces = new ArrayList<>();
+        if(!video||recordPreview)surfaces.add(preview.getSurface());
+        if(video)surfaces.add(recorder.getSurface());
+        else if(captureMode.equals("photo"))surfaces.add(photos.getSurface());
+        final LiveVideo streaming=video||liveRejected?null:live;if(streaming!=null)surfaces.add(streaming.surface);
+        final LocalOutput output=video||localRejected?null:localOutput;
         if(output!=null)surfaces.add(output.surface);
         nativePreview=false;
         camera.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
             public void onConfigured(CameraCaptureSession s) {
-                if (closed) { s.close(); return; }
+                if (closed||device!=camera||generation!=configuration) { s.close(); return; }
                 session = s;
                 try {
                     if(liveRejected&&live!=null&&live.closed){LiveVideo failed=live;live=null;liveUsers=0;failed.close();}
-                    if(!localRejected&&output!=localOutput){configure(video);return;}
+                    if(!video&&!localRejected&&output!=localOutput){configure(video);return;}
                     nativePreview=output!=null&&output==localOutput;
                     request = camera.createCaptureRequest(video ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
-                    request.addTarget(preview.getSurface());
+                    if(!video||recordPreview)request.addTarget(preview.getSurface());
                     if (video) request.addTarget(recorder.getSurface());
                     if(nativePreview)request.addTarget(output.surface);
                     if(streaming!=null&&liveUsers>0)request.addTarget(streaming.surface);
@@ -356,10 +390,19 @@ final class CameraEngine implements AutoCloseable {
                     // Start recorder before applying demand so the recording target is never removed.
                     if (video) { repeat();if(!recorder.started)recorder.start(); recording = true; }
                     busy = false; ready = true; appliedPlan = null; applyDemand(true);
-                } catch (Exception e) { recording = false; busy = false; fail(e); releaseRecorder(); }
+                } catch (Exception e) {
+                    recording=false;busy=false;fail(e);releaseRecorder();
+                    if(video)try{configure(false);}catch(Exception restore){fail(restore);busy=false;}
+                }
             }
             public void onConfigureFailed(CameraCaptureSession s) {
-                s.close();session=null;request=null;busy=false;ready=false;
+                if(closed||device!=camera||generation!=configuration){s.close();return;}
+                session=null;request=null;busy=true;ready=false;
+                if(video&&recordPreview){
+                    recordPreview=false;frame=new byte[0];liveError="Preview unavailable for this recording mode";
+                    afterSessionClosed.put(s,()->{if(!closed)try{configure(true);}catch(Exception e){fail(e);releaseRecorder();busy=false;}});s.close();return;
+                }
+                s.close();busy=false;
                 if(output!=null){localRejected=true;nativePreview=false;try{configure(video);}catch(Exception e){fail(e);busy=false;}return;}
                 if(streaming!=null){liveRejected=true;liveError="Сочетание камеры и H.264 просмотра недоступно — совместимый JPEG";streaming.closed=true;try{configure(video);}catch(Exception e){fail(e);}return;}
                 recording=false;releaseRecorder();
@@ -420,7 +463,7 @@ final class CameraEngine implements AutoCloseable {
                     String preset=cmd.optString("preset",framing);if(Framing.target(preset)==0)throw new IllegalArgumentException("Неизвестный план");
                     zoom=next;framing=preset;autoZoom=cmd.optBoolean("autoZoom",autoZoom);tracking=cmd.optBoolean("tracking",tracking)||autoZoom;faceFocus=cmd.optBoolean("faceFocus",faceFocus);if(!tracking){faces=new JSONArray();focusPoint=null;}
                     if(cmd.has("focusX")){float x=(float)cmd.getDouble("focusX"),y=(float)cmd.getDouble("focusY");if(!Float.isFinite(x)||!Float.isFinite(y)||x<0||x>1||y<0||y>1)throw new IllegalArgumentException("Точка вне кадра");focusPoint=new float[]{x,y};faceFocus=false;focus=-1;}
-                    settings(request);applyDemand(true);break;
+                    zoomMotion.reset(zoom,SystemClock.elapsedRealtime());settings(request);applyDemand(true);break;
                 }
                 case "stream_config": {
                     String profile=cmd.optString("profile","balanced");if(!profile.equals("balanced")&&!profile.equals("detail"))throw new IllegalArgumentException("Unknown stream profile");
@@ -436,7 +479,7 @@ final class CameraEngine implements AutoCloseable {
                     if((mode.equals("video") || capabilities.getJSONArray("videoModes").length()>0) && !CaptureCapabilities.videoAllowed(capabilities,w,h,fps))throw new IllegalArgumentException("Video size/FPS not supported by camera and encoder");
                     if(!CaptureCapabilities.photoAllowed(capabilities,format,pw,ph))throw new IllegalArgumentException("Photo format/size not supported");
                     error="";
-                    boolean rebuild=!format.equals(photoFormat)||pw!=photoWidth||ph!=photoHeight;
+                    boolean rebuild=!mode.equals(captureMode)||!format.equals(photoFormat)||pw!=photoWidth||ph!=photoHeight;
                     captureMode=mode; videoWidth=w;videoHeight=h;videoFps=fps;photoFormat=format;photoWidth=pw;photoHeight=ph;sound=cmd.optBoolean("audio",sound);
                     if(rebuild) {
                         ready=false;busy=true;session.stopRepeating();session.abortCaptures();session.close();session=null;request=null;
@@ -561,7 +604,7 @@ final class CameraEngine implements AutoCloseable {
     }
     void releaseRecorder() { if (recorder != null) { try { recorder.close(); } catch (Exception ignored) {} recorder = null; }if(recordingTarget!=null){try{recordingTarget.close();}catch(Exception ignored){}recordingTarget=null;} }
     void closeCamera() {
-        ready = false; appliedPlan = null; request = null; powerState = "opening";
+        configuration++;ready = false; appliedPlan = null; request = null; powerState = "opening";
         if (session != null) { session.close(); session = null; }
         if (camera != null) { camera.close(); camera = null; }
         if(live!=null){live.close();live=null;}for(LiveVideo old:retiredEncoders)old.close();retiredEncoders.clear();afterSessionClosed.clear();liveUsers=0;liveRejected=false;

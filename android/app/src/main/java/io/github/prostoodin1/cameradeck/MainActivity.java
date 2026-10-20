@@ -81,7 +81,7 @@ public class MainActivity extends Activity {
         center=text("Ваша камера. Ваш кадр.\nНажмите «Включить»",17,MUTED);center.setGravity(Gravity.CENTER);finder.addView(center,new FrameLayout.LayoutParams(-1,-1));
         trackingOverlay=new TrackingOverlay(this);finder.addView(trackingOverlay,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout top=column();top.setPadding(dp(16),dp(8),dp(16),dp(8));top.setBackground(panel(0xc0060606,0x22444444,22));
-        LinearLayout header=row();TextView brand=text("ORBIT",16,YELLOW);brand.setLetterSpacing(.17f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        LinearLayout header=row();TextView brand=text("GLIDE",16,YELLOW);brand.setLetterSpacing(.17f);header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
         start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(112),dp(44)));
         Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(116),dp(44));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
         connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setOnClickListener(v->pairingSettings());top.addView(connection);
@@ -203,17 +203,36 @@ public class MainActivity extends Activity {
         CameraEngine e=engine();if(e==null||!e.ready){toast("Сначала включите камеру");return;}if(e.recording||e.photoPending){toast("Сначала остановите запись");return;}
         try{
             LinearLayout body=dialogBody();JSONObject cap=e.capabilities;
-            body.addView(text("Возможности этого объектива · без искусственного ограничения 4K / 24 Мп",12,MUTED));
+            videoControl=rateControl=photoControl=photoSizeControl=null;
+            boolean videoMode=e.captureMode.equals("video");
+            body.addView(text(videoMode?"Видеозапись":"Фотография",12,MUTED));
             List<JSONObject> video=sizes(cap.getJSONArray("videoModes"));video.sort((a,b)->Long.compare((long)b.optInt("width")*b.optInt("height"),(long)a.optInt("width")*a.optInt("height")));
-            body.addView(videoControl=button("Видео   "+e.videoWidth+" × "+e.videoHeight+"   ›",()->choose("Разрешение видео",labels(video),-1,index->{JSONObject v=video.get(index);JSONArray rates=v.getJSONArray("fps");command("capture_config","videoWidth",v.getInt("width"),"videoHeight",v.getInt("height"),"videoFps",rates.getInt(rates.length()-1));})));
+            if(videoMode){
+            body.addView(videoControl=button("Видео   "+e.videoWidth+" × "+e.videoHeight+"   ›",()->videoSizes(video,false)));
             body.addView(rateControl=button("Частота   "+e.videoFps+" fps   ›",()->{List<String> rates=new ArrayList<>();try{for(JSONObject v:video)if(v.optInt("width")==e.videoWidth&&v.optInt("height")==e.videoHeight){JSONArray fps=v.getJSONArray("fps");for(int i=0;i<fps.length();i++)rates.add(fps.getString(i));}choose("Частота видеозаписи",rates,rates.indexOf(Integer.toString(e.videoFps)),index->command("capture_config","videoFps",Integer.parseInt(rates.get(index))));}catch(Exception ex){toast(ex.getMessage());}}));
+            CheckBox sound=check("Звук в видеозаписи",e.sound);sound.setOnCheckedChangeListener((v,value)->command("capture_config","audio",value));body.addView(sound);
+            }else{
             List<String> formats=new ArrayList<>();JSONArray fs=cap.getJSONArray("photoFormats");for(int i=0;i<fs.length();i++)formats.add(fs.getString(i));
             body.addView(photoControl=button("Фото   "+e.photoFormat.toUpperCase(Locale.US)+"   ›",()->choose("Формат фото",formats,formats.indexOf(e.photoFormat),index->{JSONArray dims=cap.getJSONArray(formats.get(index).equals("dng")?"rawSizes":"photoSizes");JSONObject p=dims.getJSONObject(0);command("capture_config","photoFormat",formats.get(index),"photoWidth",p.getInt("width"),"photoHeight",p.getInt("height"));})));
             body.addView(photoSizeControl=button("Размер фото   "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)+"   ›",()->{try{List<JSONObject> photo=sizes(cap.getJSONArray(e.photoFormat.equals("dng")?"rawSizes":"photoSizes"));photo.sort((a,b)->Long.compare((long)b.optInt("width")*b.optInt("height"),(long)a.optInt("width")*a.optInt("height")));choose("Размер фото",labels(photo),-1,index->{JSONObject p=photo.get(index);command("capture_config","photoWidth",p.getInt("width"),"photoHeight",p.getInt("height"));});}catch(Exception ex){toast(ex.getMessage());}}));
-            CheckBox sound=check("Звук в видеозаписи",e.sound);sound.setOnCheckedChangeListener((v,value)->command("capture_config","audio",value));body.addView(sound);
+            }
             body.addView(button("Все возможности телефона   ›",this::capabilityDetails));body.addView(button("Папка сохранения   ›",this::storageSettings));
             qualitySheet=dialog().setTitle("Качество съёмки").setView(scroll(body)).setPositiveButton("Готово",null).create();qualitySheet.show();
         }catch(Exception ex){toast(ex.getMessage());}
+    }
+    void videoSizes(List<JSONObject> all,boolean advanced){
+        CameraEngine e=engine();if(e==null)return;
+        List<JSONObject> choices=new ArrayList<>();List<String> names=new ArrayList<>();
+        for(JSONObject item:all){int w=item.optInt("width"),h=item.optInt("height");String name=CaptureChoices.videoLabel(w,h);
+            if(advanced||!name.isEmpty()||w==e.videoWidth&&h==e.videoHeight){choices.add(item);names.add((name.isEmpty()?"":name+" · ")+w+" × "+h);}}
+        if(choices.isEmpty()&&!all.isEmpty()){choices.add(all.get(0));names.add(labels(choices).get(0));}
+        if(!advanced)names.add("Все разрешения…");
+        choose("Разрешение видео",names,-1,index->{
+            if(index==choices.size()){videoSizes(all,true);return;}
+            JSONObject v=choices.get(index);JSONArray rates=v.getJSONArray("fps");int rate=rates.getInt(0);
+            for(int i=0;i<rates.length();i++){int r=rates.getInt(i);if(r<=e.videoFps)rate=Math.max(rate,r);}
+            command("capture_config","videoWidth",v.getInt("width"),"videoHeight",v.getInt("height"),"videoFps",rate);
+        });
     }
     void capabilityDetails(){
         CameraEngine e=engine();if(e==null){toast("Сначала включите камеру");return;}
@@ -268,7 +287,11 @@ public class MainActivity extends Activity {
         center.setVisibility(showPreview&&(e.nativePreview||e.frame.length>0)?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
         String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:(!UpdateClient.message.isEmpty()&&new File(getFilesDir(),"update.apk").isFile())?UpdateClient.message:(e.captureMode.equals("video")?e.videoWidth+" × "+e.videoHeight+" · "+e.videoFps+" fps · "+(e.sound?"Со звуком":"Без звука"):e.photoFormat.toUpperCase(Locale.US)+" · "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)));
         if(SystemClock.elapsedRealtime()>nextStorageRefresh){nextStorageRefresh=SystemClock.elapsedRealtime()+3000;new Thread(()->{long free=e.store.freeBytes(),phone=e.mediaDir.getUsableSpace();String label=e.store.label();ui.post(()->storage.setText(label+" · "+(free>=0?android.text.format.Formatter.formatFileSize(this,free)+" свободно":"объём недоступен")+(e.store.tree()!=null?"  /  телефон: "+android.text.format.Formatter.formatFileSize(this,phone):"")));},"CameraDeck-storage-status").start();}
-        if(qualitySheet!=null&&qualitySheet.isShowing()){videoControl.setText("Видео   "+e.videoWidth+" × "+e.videoHeight+"   ›");rateControl.setText("Частота   "+e.videoFps+" fps   ›");photoControl.setText("Фото   "+e.photoFormat.toUpperCase(Locale.US)+"   ›");photoSizeControl.setText("Размер фото   "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)+"   ›");}
+        if(qualitySheet!=null&&qualitySheet.isShowing()){
+            if((videoControl!=null)!=e.captureMode.equals("video")){qualitySheet.dismiss();}
+            else if(videoControl!=null){videoControl.setText("Видео   "+e.videoWidth+" × "+e.videoHeight+"   ›");rateControl.setText("Частота   "+e.videoFps+" fps   ›");}
+            else {photoControl.setText("Фото   "+e.photoFormat.toUpperCase(Locale.US)+"   ›");photoSizeControl.setText("Размер фото   "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)+"   ›");}
+        }
         if(pairing!=null&&pairing.isShowing()){code.setText("PIN  "+s.pin);fingerprint.setText("Wi-Fi: "+localAddresses()+"\n\nSHA-256\n"+s.fingerprint.replaceAll("(.{8})","$1 "));}
     }
     void renderPreview(){

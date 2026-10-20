@@ -31,9 +31,9 @@ android {
         debug {
             if (previewBuild) {
                 applicationIdSuffix '.aurora'
-                versionNameSuffix '-orbit-preview'
+                versionNameSuffix '-glide-preview'
                 buildConfigField 'boolean', 'PREVIEW_BUILD', 'true'
-                manifestPlaceholders = [appLabel: 'Camera Deck Orbit']
+                manifestPlaceholders = [appLabel: 'Camera Deck Glide']
             }
         }
         release { signingConfig signingConfigs.release; minifyEnabled false }
