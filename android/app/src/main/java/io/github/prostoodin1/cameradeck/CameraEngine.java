@@ -112,6 +112,9 @@ final class CameraEngine implements AutoCloseable {
             if(retired!=null){retired.close();retiredEncoders.remove(retired);}
             if(closed)return;
             try{
+                StreamConfigurationMap streams=characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+                long previewDuration=streams.getOutputMinFrameDuration(ImageFormat.YUV_420_888,new Size(preview.getWidth(),preview.getHeight()));
+                if(previewDuration>0&&previewDuration>1_000_000_000L/videoFps+1_000_000L){recordPreview=false;frame=new byte[0];liveError="Preview disabled to preserve selected recording FPS";}
                 recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
                 boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
                 recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);

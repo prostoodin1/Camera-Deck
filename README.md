@@ -24,7 +24,7 @@ This is not WebRTC, and zero delay, 60 fps on every phone, perfect audio/video s
 
 ## Viewer rotation
 
-Each camera has **Повернуть 90°** and **Блок. поворот**, also available fullscreen. Manual rotation is applied to the original decoded frame, including face overlays and tap-to-focus coordinates. Lock freezes automatic orientation while manual rotation remains available. Settings persist per pinned phone identity. Viewer controls do not modify the phone recording. Update Android as well: Glide fixes the reversed OrientationEventListener sign that inverted landscape streams by 180 degrees.
+Each camera has **Повернуть 90°** and **Блок. поворот**, also available fullscreen. Manual rotation is applied to the original decoded frame, including face overlays and tap-to-focus coordinates. Lock freezes automatic orientation while manual rotation remains available. Settings persist per pinned phone identity. Viewer controls do not modify the phone recording. Update Android as well: the included orientation fix corrects the reversed OrientationEventListener sign that inverted landscape streams by 180 degrees.
 
 ## Framing, zoom and focus
 
