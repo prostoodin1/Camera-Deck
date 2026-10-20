@@ -179,7 +179,7 @@ class CameraTile(QWidget):
         if self.fullscreen is not None:self.full_view.set_frame(image)
 
     def receive_frames(self):
-        stream_supported=hasattr(self.client,"frames");avc=True
+        stream_supported=hasattr(self.client,"frames");avc=True;retry_avc=0
         while not self.stopped.is_set():
             if getattr(self.client,'force_avc',False):avc=True;self.client.force_avc=False
             if not self.preview_enabled.is_set() or self.paused.is_set():self.stopped.wait(.1);continue
@@ -193,6 +193,7 @@ class CameraTile(QWidget):
                     self.transport="JPEG"
                     for data,rotation in self.client.frames(self.stopped,self.preview_enabled):
                         if self.paused.is_set() or getattr(self.client,'force_avc',False):break
+                        if time.monotonic()>=retry_avc:avc=True;break
                         image=QImage.fromData(data)
                         if not image.isNull():
                             with self.frame_lock:self.pending_frame=(image,rotation)
@@ -202,7 +203,7 @@ class CameraTile(QWidget):
                         with self.frame_lock:self.pending_frame=(image,self.status.get("rotation",0))
                     self.stopped.wait(1/max(1,min(30,self.status.get("previewFps",10))))
             except StreamUnavailable:
-                if avc:avc=False
+                if avc:avc=False;retry_avc=time.monotonic()+15
                 else:stream_supported=False
             except Exception as exc:
                 if self.stopped.is_set():return

@@ -54,6 +54,7 @@ public class CameraService extends Service {
     final Map<String,String> owners=new ConcurrentHashMap<>();
     synchronized void forgetClient(String client){trusted.remove(client);owners.entrySet().removeIf(e->{if(e.getValue().equals(client)){tokens.remove(e.getKey());return true;}return false;});}
     synchronized JSONObject session(String owner)throws Exception {
+        if(!owner.isEmpty()&&!trusted.preferences.contains(owner))throw new SecurityException("Доверие отозвано");
         long now=System.currentTimeMillis();tokens.entrySet().removeIf(e->e.getValue()<now);owners.keySet().retainAll(tokens.keySet());
         if(!owner.isEmpty())owners.entrySet().removeIf(e->{if(owner.equals(e.getValue())){tokens.remove(e.getKey());return true;}return false;});
         if(tokens.size()>=4)throw new IllegalStateException("Maximum four paired sessions");
@@ -61,7 +62,7 @@ public class CameraService extends Service {
         return new JSONObject().put("token",token).put("expiresIn",28800).put("name",name()).put("id",id).put("trustedId",owner);
     }
     private String name() { return getSharedPreferences("deck", 0).getString("name", Build.MODEL); }
-    void revoke() { tokens.clear(); owners.clear();if(trusted!=null)trusted.clear();rotatePin(); }
+    synchronized void revoke() { tokens.clear(); owners.clear();if(trusted!=null)trusted.clear();rotatePin(); }
     void rotatePin() { pin = String.format(Locale.US, "%04d", random.nextInt(10000)); pinExpires = System.currentTimeMillis() + 300_000; }
 
     synchronized void updatePower() {

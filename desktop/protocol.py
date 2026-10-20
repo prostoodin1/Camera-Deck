@@ -171,7 +171,9 @@ class CameraClient:
             if self.token==previous:self.resume(self.refresh_secret);self.force_avc=True
 
     def command(self, action: str, **kwargs) -> dict:
-        return self.json("/command", {"action": action, **kwargs})
+        result=self.json("/command", {"action": action, **kwargs})
+        if action in ('camera','stream_config'):self.force_avc=True
+        return result
 
     def download(self, filename: str, folder: Path) -> Path:
         import re
