@@ -26,7 +26,7 @@ final class FaceTracker implements AutoCloseable {
                     for(Face face:faces){Rect r=face.getBoundingBox();float[] a=Framing.rotate((float)r.left/rw,(float)r.top/rh,(360-rotation)%360),b=Framing.rotate((float)r.right/rw,(float)r.bottom/rh,(360-rotation)%360);
                         JSONObject item=new JSONObject().put("left",Math.min(a[0],b[0])).put("top",Math.min(a[1],b[1])).put("right",Math.max(a[0],b[0])).put("bottom",Math.max(a[1],b[1]));
                         JSONArray eyes=new JSONArray();for(int kind:new int[]{FaceLandmark.LEFT_EYE,FaceLandmark.RIGHT_EYE}){FaceLandmark landmark=face.getLandmark(kind);if(landmark!=null){PointF p=landmark.getPosition();float[] eye=Framing.rotate(p.x/rw,p.y/rh,(360-rotation)%360);eyes.put(new JSONArray().put(eye[0]).put(eye[1]));}}item.put("eyes",eyes);out.put(item);
-                        float size=(float)r.height()/rh;if(size>largest){largest=size;center=new float[]{(a[0]+b[0])/2,(a[1]+b[1])/2};}
+                        float size=(float)r.height()/rh;if(size>largest){largest=size;center=new float[]{(a[0]+b[0])/2,(a[1]+b[1])/2,Math.abs(a[0]-b[0])/2,Math.abs(a[1]-b[1])/2};}
                     }
                     engine.faces=out;engine.facesAt=captured;final float height=largest;final float[] point=center;
                     engine.handler.post(()->engine.trackFace(height,point));

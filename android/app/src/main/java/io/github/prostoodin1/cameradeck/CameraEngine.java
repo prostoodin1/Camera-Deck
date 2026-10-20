@@ -138,7 +138,10 @@ final class CameraEngine implements AutoCloseable {
     void trackFace(float height,float[] point){
         if(!ready||busy||photoPending||closed||!tracking)return;
         boolean changed=false;
-        if(autoZoom&&point!=null){float next=Framing.smooth(zoom,height,framing,minZoom,maxZoom);if(Math.abs(next-zoom)>.005f){zoom=next;changed=true;}}
+        if(autoZoom&&point!=null){float next=Framing.smooth(zoom,height,framing,minZoom,maxZoom);
+            float edge=Math.max(Math.abs(point[0]-.5f)+point[2],Math.abs(point[1]-.5f)+point[3]);
+            if(edge>0)next=Math.max(minZoom,Math.min(maxZoom,Math.max(zoom*.95f,Math.min(next,zoom*.46f/edge))));
+            if(Math.abs(next-zoom)>.005f){zoom=next;changed=true;}}
         if(faceFocus&&focus<0&&point!=null&&(focusPoint==null||Math.abs(focusPoint[0]-point[0])+Math.abs(focusPoint[1]-point[1])>.03f)){focusPoint=point;changed=true;}
         if(changed)try{settings(request);applyDemand(true);}catch(Exception e){fail(e);}
     }
