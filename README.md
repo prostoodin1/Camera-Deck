@@ -42,6 +42,8 @@ Windows anonymously checks `prostoodin1/Camera-Deck` releases on launch and hour
 
 No GitHub account, Git installation or token is required for installed apps to check/download updates. Update keys and APK identity remain continuous with earlier builds. Publishing releases is a separate maintainer action requiring GitHub authentication.
 
+Versions through 0.3.0 checked the previous development repository. Download/install 0.3.1 from this public repository once to switch channels; subsequent updates use this public repository automatically. Install the APK over the existing app rather than uninstalling it, to keep recordings.
+
 - Windows downloads a newer EXE automatically, verifies its signed metadata, size and SHA-256, and offers **Обновить Windows**. Confirming an idle restart replaces the EXE and keeps `<exe>.previous` for recovery. Current recordings or unknown camera states block installation. The initial EXE has no Windows Authenticode publisher certificate and may trigger SmartScreen.
 - For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone press **Установить обновление**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
 - Ordinary APK updates keep data; **never uninstall to update**. A complete real-device update from version N to N+1 has not yet been exercised.
