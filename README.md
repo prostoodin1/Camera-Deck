@@ -2,7 +2,9 @@
 
 Android cameras controlled from a Windows desk. Public source, signed APK/EXE releases and anonymous updates: [prostoodin1/Camera-Deck](https://github.com/prostoodin1/Camera-Deck).
 
-Version **0.3.1 is an experimental prerelease**, initially intended for Pixel 8 Pro and Galaxy S22 Ultra. Neither phone has been connected to the development machine during validation. An APK build or passing desktop tests does not demonstrate real camera compatibility, latency or long-session reliability.
+Version **0.4.0 is an experimental prerelease**, initially intended for Pixel 8 Pro and Galaxy S22 Ultra. Neither phone has been connected to the development machine during validation. An APK build or passing desktop tests does not demonstrate real camera compatibility, latency or long-session reliability.
+
+Both native apps now use an original black/yellow camera-console interface: large viewfinders, compact exposure readouts and clearly separated recording controls. On Android, connection, capture and power controls open in dedicated panels. This is not a Sony product and uses no Sony branding or assets.
 
 ## Screenshots: functional test stand
 
@@ -18,8 +20,8 @@ Reproduce with `python scripts/capture_demo.py`. The development simulator liste
 
 ## First connection
 
-1. Install `CameraDeck-Android-0.3.1.apk` on each phone. Open it, grant camera and microphone access, set its name and press **Включить камеру**. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission.
-2. Run `CameraDeck-Windows-0.3.1.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
+1. Install `CameraDeck-Android-0.4.0.apk` on each phone. Open it, press **ВКЛ** and grant camera and microphone access. Open **ПОДКЛ.** for the name, PIN, IP and fingerprint. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission. Local **VIEW** starts disabled; enable it if you need an on-phone preview.
+2. Run `CameraDeck-Windows-0.4.0.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
 3. Press **Найти телефоны**, select a device and **Подключить**. If discovery fails, enter the IPv4 address displayed by the phone using **По IP**. Guest Wi-Fi/client isolation and Windows Firewall can block discovery; use a Private network and allow Camera Deck only on that network. Do not expose the ports to the Internet.
 4. Compare the **entire SHA-256 TLS fingerprint** shown by both apps, confirm the match and enter the phone's four-digit PIN. The comparison is required for first pairing, including manual IP connections.
 5. Repeat for the second phone. Give each tile a group name and use the group selector / column selector to arrange the desk.
@@ -42,10 +44,10 @@ Windows anonymously checks `prostoodin1/Camera-Deck` releases on launch and hour
 
 No GitHub account, Git installation or token is required for installed apps to check/download updates. Update keys and APK identity remain continuous with earlier builds. Publishing releases is a separate maintainer action requiring GitHub authentication.
 
-Versions through 0.3.0 checked the previous development repository. Download/install 0.3.1 from this public repository once to switch channels; subsequent updates use this public repository automatically. Install the APK over the existing app rather than uninstalling it, to keep recordings.
+Versions through 0.3.0 checked the previous development repository. Download/install 0.3.1 or newer from this public repository once to switch channels; subsequent updates use this public repository automatically. Install the APK over the existing app rather than uninstalling it, to keep recordings.
 
 - Windows downloads a newer EXE automatically, verifies its signed metadata, size and SHA-256, and offers **Обновить Windows**. Confirming an idle restart replaces the EXE and keeps `<exe>.previous` for recovery. Current recordings or unknown camera states block installation. The initial EXE has no Windows Authenticode publisher certificate and may trigger SmartScreen.
-- For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone press **Установить обновление**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
+- For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone open **ПИТАНИЕ → УСТАНОВИТЬ ОБНОВЛЕНИЕ**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
 - Ordinary APK updates keep data; **never uninstall to update**. A complete real-device update from version N to N+1 has not yet been exercised.
 
 No shared GitHub credential is embedded in either app. Android updates are fetched by Windows from public releases and passed to the phone. Camera control itself does not need Internet access.

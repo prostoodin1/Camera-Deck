@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.3.1"
-VERSION_CODE = 5
+VERSION = "0.4.0"
+VERSION_CODE = 6
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CameraDeck"

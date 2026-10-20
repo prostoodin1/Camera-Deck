@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 from protocol import CameraClient, discover
 from audio import AudioMonitor
+from appearance import THEME,Viewfinder,shutter_label
 import updates
 
 
@@ -40,49 +41,58 @@ class CameraTile(QWidget):
         self.status = {}
         self.failures = 0
         self.setObjectName("tile")
-        box = QVBoxLayout(self)
-        heading = QHBoxLayout()
+        box = QVBoxLayout(self);box.setContentsMargins(10,8,10,8);box.setSpacing(7)
+        heading = QHBoxLayout();heading.setSpacing(6)
         self.name = QLineEdit(name)
+        self.name.setObjectName("cameraName")
         self.name.setToolTip("Название окна на этом компьютере")
         self.group = QLineEdit("Общая")
+        self.group.setMaximumWidth(115)
         self.group.setPlaceholderText("Группа")
         self.group.editingFinished.connect(window.rebuild)
-        remove = QPushButton("Отключить")
+        remove = QPushButton("Откл.");remove.setToolTip("Отключить эту камеру от пульта")
         remove.clicked.connect(lambda: window.remove(self))
         heading.addWidget(self.name, 2); heading.addWidget(self.group, 1); heading.addWidget(remove)
         box.addLayout(heading)
-        self.video = QLabel("Ожидаем изображение с телефона…")
-        self.video.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video.setMinimumSize(260, 210)
-        self.video.setStyleSheet("background:#080d14;border-radius:10px;color:#9facbf")
-        box.addWidget(self.video)
+        self.video = Viewfinder()
+        box.addWidget(self.video,1)
+        readings=QHBoxLayout();readings.setSpacing(4)
+        self.iso_readout=QPushButton("ISO —");self.shutter_readout=QPushButton("S —")
+        self.focus_readout=QPushButton("AF");self.profile_readout=QPushButton("—")
+        for button in (self.iso_readout,self.shutter_readout,self.focus_readout,self.profile_readout):
+            button.setObjectName("readout");readings.addWidget(button)
+        self.iso_readout.clicked.connect(lambda:self.settings(1));self.shutter_readout.clicked.connect(lambda:self.settings(1))
+        self.focus_readout.clicked.connect(lambda:self.settings(1));self.profile_readout.clicked.connect(lambda:self.settings(0))
+        box.addLayout(readings)
         self.info = QLabel(client.host)
-        self.info.setWordWrap(True)
+        self.info.setWordWrap(True);self.info.setStyleSheet("color:#858585;font-size:11px")
         box.addWidget(self.info)
         controls = QHBoxLayout()
-        self.photo = QPushButton("Фото")
+        self.photo = QPushButton("◎ Фото");self.photo.setObjectName("primary")
         self.photo.clicked.connect(lambda: self.command("photo"))
         self.record = QPushButton("● Запись")
         self.record.clicked.connect(lambda: self.command("record_stop" if self.status.get("recording") else "record_start"))
         self.settings_button = QPushButton("Настройки")
-        self.settings_button.clicked.connect(self.settings)
+        self.settings_button.clicked.connect(lambda:self.settings(0))
         self.files = QPushButton("Материалы")
         self.files.clicked.connect(self.media)
+        self.mode=QComboBox();self.mode.addItem("PHOTO","photo");self.mode.addItem("MOVIE","video");self.mode.setMaximumWidth(105)
+        self.mode.activated.connect(lambda _:self.command("capture_config",mode=self.mode.currentData()))
+        controls.addWidget(self.mode)
         for button in (self.photo, self.record, self.settings_button, self.files): controls.addWidget(button)
         box.addLayout(controls)
-        self.mode=QComboBox();self.mode.addItem("Фото","photo");self.mode.addItem("Видео","video")
-        self.mode.activated.connect(lambda _:self.command("capture_config",mode=self.mode.currentData()))
-        box.addWidget(self.mode)
-        self.view_toggle = QCheckBox("Предпросмотр")
+        switches=QHBoxLayout()
+        self.view_toggle = QCheckBox("VIEW");self.view_toggle.setToolTip("Передавать изображение с камеры")
         self.view_toggle.setChecked(True)
         self.view_toggle.toggled.connect(window.rebuild)
-        box.addWidget(self.view_toggle)
-        self.listen=QCheckBox("Слушать микрофон телефона")
+        switches.addWidget(self.view_toggle)
+        self.listen=QCheckBox("AUDIO MONITOR");self.listen.setToolTip("Слушать микрофон телефона; звук в записи настраивается отдельно")
         self.listen.toggled.connect(self.sync_audio)
-        box.addWidget(self.listen)
+        switches.addWidget(self.listen);switches.addStretch();box.addLayout(switches)
         self.monitor=AudioMonitor(client,self);self.monitor.failed.connect(self.audio_failed)
         self.phone_update = QPushButton("Обновить Android")
         self.phone_update.setEnabled(False)
+        self.phone_update.setVisible(False)
         self.phone_update.clicked.connect(lambda: window.update_phone(self))
         box.addWidget(self.phone_update)
         self.feed = Feed()
@@ -144,41 +154,46 @@ class CameraTile(QWidget):
         self.show_status(status)
         image = QImage.fromData(data)
         if image.isNull(): return
-        pixmap = QPixmap.fromImage(image).transformed(QTransform().rotate(status.get("rotation", 0)))
-        self.video.setPixmap(pixmap.scaled(self.video.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.video.set_frame(image.transformed(QTransform().rotate(status.get("rotation", 0))))
 
     def show_status(self, status):
         self.status = status
         self.failures = 0
         recording = status.get("recording", False)
+        self.video.set_status(status)
+        self.iso_readout.setText("ISO  "+str(status.get("iso") or "—"))
+        self.shutter_readout.setText("S  "+shutter_label(status.get("exposureNs",0)))
+        self.focus_readout.setText("AF-C" if status.get("focus",-1)<0 else f"MF  {status['focus']:.1f}")
+        self.profile_readout.setText(f"{status.get('videoHeight',1080)}p {status.get('videoFps',30)}" if status.get("mode")=="video" else status.get("photoFormat","jpg").upper())
         mode=status.get("mode","photo")
         self.mode.setCurrentIndex(1 if mode=="video" else 0);self.mode.setEnabled(not recording and status.get("ready",False))
         self.record.setText("■ Стоп" if recording else "● Запись")
-        self.record.setStyleSheet("background:#aa3245" if recording else "")
+        self.record.setStyleSheet("background:#a62520;color:#ffffff;border-color:#ed554b" if recording else "")
         self.record.setEnabled(status.get("ready", False) and mode=="video")
         self.photo.setEnabled(status.get("ready", False) and not recording and mode=="photo")
         self.listen.setEnabled(status.get("audioAvailable",False))
-        self.info.setText(f"{'● ЗАПИСЬ · ' if recording else ''}{self.client.host} · ISO {status.get('iso', '—')} · "
-                          f"{status.get('exposureNs', 0)/1e6:.2f} мс · {status.get('lastFile', '')}\n"
-                          f"{status.get('error', '') or ('Запись: '+str(status.get('videoWidth',1920))+'×'+str(status.get('videoHeight',1080))+' · '+str(status.get('videoFps',30))+' fps · '+('со звуком' if status.get('audio') else 'без звука'))}\n"
-                          f"{'Ожидание · камера не снимает' if status.get('powerState')=='standby' else 'Просмотр: около 640px · до '+str(status.get('previewFps',10))+' fps'}")
+        self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  VIEW ≈640px")
+        self.info.setToolTip(status.get("lastFile", ""))
         if self.window.available:
             self.phone_update.setEnabled(self.window.available["code"] > status.get("versionCode", 0) and not recording)
+            self.phone_update.setVisible(self.window.available["code"] > status.get("versionCode",0))
 
     def command(self, action, **kwargs):
         self.window.run(lambda: self.client.command(action, **kwargs), lambda _: self.info.setText("Команда принята; ожидаем состояние камеры…"))
 
-    def settings(self):
+    def settings(self,initial_tab=0):
         if not self.status: return
         status = self.status
         dialog = QDialog(self)
         dialog.setWindowTitle("Настройки камеры — " + self.name.text())
-        dialog.setMinimumWidth(600)
+        dialog.setMinimumWidth(530)
         outer=QVBoxLayout(dialog);tabs=QTabWidget();outer.addWidget(tabs)
         capture_page=QWidget();sensor_page=QWidget()
         capture_page.setObjectName("settingsPage");sensor_page.setObjectName("settingsPage")
         tabs.addTab(capture_page,"Съёмка и форматы");tabs.addTab(sensor_page,"Экспозиция и фокус")
+        tabs.setCurrentIndex(initial_tab)
         form = QFormLayout(capture_page)
+        form.setVerticalSpacing(10)
         cameras = QComboBox()
         for camera in status.get("cameras", []):
             cameras.addItem(f"Камера {camera['id']} · " + {0: "фронтальная", 1: "задняя", 2: "внешняя"}.get(camera.get("facing"), ""), camera["id"])
@@ -277,28 +292,17 @@ class Window(QMainWindow):
         self.tiles, self.jobs, self.devices = [], [], []
         self.available = None
         self.checking = False
-        self.setStyleSheet("""
-            QMainWindow,QDialog {background:#101722;color:#e5edf7}
-            QWidget#root,QWidget#cameraGrid {background:#101722}
-            QWidget {font-family:'Segoe UI';font-size:13px;color:#e5edf7}
-            QLabel {background:transparent}
-            QPushButton {background:#26374e;border:1px solid #3b506b;border-radius:7px;padding:9px 12px}
-            QPushButton:hover {background:#365475} QPushButton:disabled {color:#657080;background:#1b2635}
-            QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#172332;border:1px solid #34465e;border-radius:6px;padding:7px}
-            QWidget#tile {background:#182334;border:1px solid #2b3e56;border-radius:12px}
-            QScrollArea {border:0;background:transparent} QCheckBox {padding:5px}
-            QTabWidget::pane,QStackedWidget {background:#101722;border:1px solid #34465e}
-            QWidget#settingsPage {background:#101722}
-            QTabBar::tab {background:#26374e;color:#b7c8dd;padding:9px 14px;border:1px solid #34465e}
-            QTabBar::tab:selected {background:#172332;color:#ffffff}
-        """)
-        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(22,20,22,18)
-        title = QLabel("CAMERA DECK"); title.setStyleSheet("font-size:27px;font-weight:700;letter-spacing:2px"); layout.addWidget(title)
-        subtitle = QLabel("Телефоны как камеры · локальная Wi-Fi сеть · оригиналы на устройствах"); subtitle.setStyleSheet("color:#9eafc5"); layout.addWidget(subtitle)
+        self.setStyleSheet(THEME)
+        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(14,12,14,10);layout.setSpacing(8)
+        brand=QHBoxLayout()
+        title = QLabel("CAMERA DECK"); title.setStyleSheet("font-size:21px;font-weight:700;letter-spacing:2px;color:#f2c94c");brand.addWidget(title)
+        subtitle = QLabel("REMOTE CAMERA CONTROL"); subtitle.setStyleSheet("font-size:10px;color:#777777;letter-spacing:2px");brand.addWidget(subtitle);brand.addStretch()
+        self.connection_count=QLabel("NO SOURCE");self.connection_count.setStyleSheet("font-family:'Consolas';color:#f2c94c");brand.addWidget(self.connection_count)
+        layout.addLayout(brand)
         bar = QHBoxLayout()
         self.device_list = QComboBox(); self.device_list.setMinimumWidth(280)
         self.scan = QPushButton("Найти телефоны"); self.scan.clicked.connect(self.scan_devices)
-        connect = QPushButton("Подключить"); connect.clicked.connect(self.connect_device)
+        connect = QPushButton("Подключить");connect.setObjectName("primary"); connect.clicked.connect(self.connect_device)
         manual = QPushButton("По IP"); manual.clicked.connect(self.manual)
         self.filter = QComboBox(); self.filter.addItem("Все группы"); self.filter.currentTextChanged.connect(self.rebuild)
         self.columns = QComboBox(); self.columns.addItems(["1 колонка", "2 колонки", "3 колонки"]); self.columns.setCurrentIndex(1); self.columns.currentIndexChanged.connect(self.rebuild)
@@ -306,22 +310,22 @@ class Window(QMainWindow):
         layout.addLayout(bar)
         self.hint = QLabel("Включите камеру в Android-приложении. Телефон и компьютер должны быть в одной сети.")
         self.hint.setWordWrap(True); layout.addWidget(self.hint)
+        self.hint.setStyleSheet("color:#828282;font-size:11px")
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        self.grid_widget = QWidget(); self.grid_widget.setObjectName("cameraGrid"); self.grid = QGridLayout(self.grid_widget); self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.grid_widget = QWidget(); self.grid_widget.setObjectName("cameraGrid"); self.grid = QGridLayout(self.grid_widget);self.grid.setContentsMargins(0,0,0,0);self.grid.setSpacing(10); self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(self.grid_widget); layout.addWidget(scroll,1)
         self.empty = QLabel("Подключите Pixel 8 Pro или Galaxy S22 Ultra\n\nИмя устройства и PIN появятся на экране телефона.\nЕсли поиск не нашёл телефон — используйте «По IP».")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:19px;color:#8196af")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:16px;color:#777777")
         self.grid.addWidget(self.empty,0,0)
         bottom = QHBoxLayout()
-        self.auto = QCheckBox("Проверять обновления автоматически")
+        self.auto = QCheckBox("Автообновления")
         self.auto.setChecked(self.load_preferences().get("autoUpdates", True))
         self.auto.toggled.connect(self.save_preferences)
-        self.update_label = QLabel("Обновления: проверка при запуске и каждый час")
+        self.update_label = QLabel("v"+updates.VERSION+" · обновления проверяются автоматически")
         self.update_label.setWordWrap(True)
         check = QPushButton("Проверить обновления"); check.clicked.connect(lambda: self.check_update(True))
         self.install_button = QPushButton("Обновить Windows"); self.install_button.setEnabled(False); self.install_button.clicked.connect(self.install_windows)
-        layout.addWidget(self.update_label)
-        bottom.addWidget(self.auto); bottom.addStretch()
+        bottom.addWidget(self.auto); bottom.addWidget(self.update_label);bottom.addStretch()
         for widget in (check,self.install_button): bottom.addWidget(widget)
         layout.addLayout(bottom)
         self.timer = QTimer(self); self.timer.timeout.connect(lambda: self.check_update() if self.auto.isChecked() else None); self.timer.start(3600000)
@@ -393,6 +397,7 @@ class Window(QMainWindow):
         QTimer.singleShot(10000,tile.deleteLater)
 
     def rebuild(self):
+        self.connection_count.setText(f"{len(self.tiles):02d} SOURCE" if self.tiles else "NO SOURCE")
         current = self.filter.currentText()
         groups = sorted({tile.group.text().strip() or "Общая" for tile in self.tiles})
         self.filter.blockSignals(True); self.filter.clear(); self.filter.addItems(["Все группы",*groups]); self.filter.setCurrentText(current if current in groups else "Все группы"); self.filter.blockSignals(False)

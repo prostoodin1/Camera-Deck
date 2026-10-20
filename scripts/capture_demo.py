@@ -28,6 +28,7 @@ from PyQt6.QtGui import QImage,QPainter,QColor,QFont,QFontDatabase
 from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget
 from main import Window,CameraTile
 from protocol import CameraClient
+from updates import VERSION,VERSION_CODE
 
 
 def fixture(index):
@@ -54,12 +55,12 @@ def fixture(index):
 
 class State:
     def __init__(self,index,frame):
-        self.index=index;self.frame=frame;self.mode="photo";self.recording=False;self.last="";self.files={};self.versionCode=5
+        self.index=index;self.frame=frame;self.mode="photo";self.recording=False;self.last="";self.files={};self.versionCode=VERSION_CODE
         self.width=1920;self.height=1080;self.fps=30;self.photoFormat="jpg"
     def status(self):
         return {"ready":True,"recording":self.recording,"error":"ТЕСТОВЫЙ СТЕНД · Android не подключён","cameraId":"0","rotation":0,"frameTime":int(time.time()*1000),
             "frameSequence":int(time.time()*10),"iso":100 if self.index==0 else 200,"exposureNs":10000000,"manualIso":0,"manualExposureNs":0,"focus":-1,
-            "lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":"0.3.1","versionCode":self.versionCode,
+            "lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
             "mode":self.mode,"videoWidth":self.width,"videoHeight":self.height,"videoFps":self.fps,"photoWidth":4000,"photoHeight":3000,"photoFormat":self.photoFormat,
             "powerState":"record_preview" if self.recording else "preview","eco":True,"previewFps":5,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
             "cameras":[{"id":"0","facing":1},{"id":"1","facing":0}],"captureCapabilities":{"videoModes":[{"width":1280,"height":720,"fps":[30,60]},{"width":1920,"height":1080,"fps":[30,60]},{"width":3840,"height":2160,"fps":[30]}],
@@ -116,7 +117,7 @@ def main():
     servers=[];window=Window(auto_checks=False);window.resize(1440,960)
     window.setWindowTitle("Camera Deck · функциональный тестовый стенд · НЕ Android-камеры")
     window.hint.setText("ТЕСТОВЫЙ СТЕНД: два симулятора по TLS. Телефоны не подключены; состояние записи имитируется.")
-    window.update_label.setText("Публичные подписанные обновления · без GitHub-токена")
+    window.update_label.setText("ТЕСТОВЫЙ СТЕНД · v"+VERSION)
     states=[State(i,fixture(i)) for i in range(2)]
     with tempfile.TemporaryDirectory(prefix="camera-deck-simulator-") as temp:
         certfile=Path(temp)/"cert.pem";keyfile=Path(temp)/"key.pem"
