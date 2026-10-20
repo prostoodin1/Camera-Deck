@@ -99,6 +99,7 @@ final class CameraEngine implements AutoCloseable {
     String liveProfile="balanced";
     boolean liveRejected;
     final Map<CameraCaptureSession,Runnable> afterSessionClosed=new IdentityHashMap<>();
+    final Set<LiveVideo> retiredEncoders=new HashSet<>();
     void beginRecording(boolean canRetry)throws Exception{
         recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
         boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
@@ -106,9 +107,9 @@ final class CameraEngine implements AutoCloseable {
         catch(Exception failure){
             recordingTarget.close();recordingTarget=null;
             if(!canRetry||live==null)throw failure;
-            LiveVideo retired=live;live=null;liveUsers=0;liveRejected=true;liveError="Для записи кодек переключён с H.264 просмотра на оригинал. Просмотр — JPEG.";
+            LiveVideo retired=live;retiredEncoders.add(retired);live=null;liveUsers=0;liveRejected=true;liveError="Для записи кодек переключён с H.264 просмотра на оригинал. Просмотр — JPEG.";
             ready=false;busy=true;CameraCaptureSession previous=session;session=null;request=null;
-            Runnable retry=()->{retired.close();if(closed)return;try{beginRecording(false);}catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}};
+            Runnable retry=()->{retired.close();retiredEncoders.remove(retired);if(closed)return;try{beginRecording(false);}catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}};
             if(previous!=null){afterSessionClosed.put(previous,retry);try{previous.stopRepeating();previous.abortCaptures();}catch(Exception ignored){}previous.close();}else retry.run();
             return;
         }
@@ -424,7 +425,7 @@ final class CameraEngine implements AutoCloseable {
                 case "stream_config": {
                     String profile=cmd.optString("profile","balanced");if(!profile.equals("balanced")&&!profile.equals("detail"))throw new IllegalArgumentException("Unknown stream profile");
                     if(recording||photoPending)throw new IllegalStateException("Остановите запись перед сменой потока");
-                    liveProfile=profile;liveRejected=false;liveError="";if(live!=null){LiveVideo old=live;live=null;liveUsers=0;configure(false);handler.postDelayed(old::close,1500);}break;
+                    liveProfile=profile;liveRejected=false;liveError="";if(live!=null){LiveVideo old=live;retiredEncoders.add(old);live=null;liveUsers=0;configure(false);handler.postDelayed(()->{old.close();retiredEncoders.remove(old);},1500);}break;
                 }
                 case "capture_config": {
                     if(recording || photoPending)throw new IllegalStateException("Stop recording / wait for photo before changing mode");
@@ -563,7 +564,7 @@ final class CameraEngine implements AutoCloseable {
         ready = false; appliedPlan = null; request = null; powerState = "opening";
         if (session != null) { session.close(); session = null; }
         if (camera != null) { camera.close(); camera = null; }
-        if(live!=null){live.close();live=null;}liveUsers=0;liveRejected=false;
+        if(live!=null){live.close();live=null;}for(LiveVideo old:retiredEncoders)old.close();retiredEncoders.clear();afterSessionClosed.clear();liveUsers=0;liveRejected=false;
         if (preview != null) { preview.close(); preview = null; }
         if (photos != null) { photos.close(); photos = null; }
         if(pendingRaw!=null){pendingRaw.close();pendingRaw=null;}rawResult=null;

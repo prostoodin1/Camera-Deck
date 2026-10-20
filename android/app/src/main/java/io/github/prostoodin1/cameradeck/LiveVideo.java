@@ -14,6 +14,7 @@ final class LiveVideo implements AutoCloseable {
     final int width,height,fps;
     final ArrayDeque<Packet> packets=new ArrayDeque<>();
     volatile boolean closed;
+    boolean released;
     volatile String error="";
     byte[] config=new byte[0];long sequence,lastSync;int buffered;
     int bitrate,ceiling;long adjusted;
@@ -62,5 +63,5 @@ final class LiveVideo implements AutoCloseable {
         for(Packet p:packets){if(behind||previous<0){if(p.key)selected=p;}else if(p.sequence>previous){selected=p;break;}}
         if(selected==null){sync();wait(200);}return selected;
     }
-    public void close(){closed=true;synchronized(this){notifyAll();}try{worker.join(1000);}catch(InterruptedException e){Thread.currentThread().interrupt();}try{codec.stop();}catch(Exception ignored){}codec.release();surface.release();}
+    public void close(){synchronized(this){if(released)return;released=true;closed=true;notifyAll();}try{worker.join(1000);}catch(InterruptedException e){Thread.currentThread().interrupt();}try{codec.stop();}catch(Exception ignored){}codec.release();surface.release();}
 }
