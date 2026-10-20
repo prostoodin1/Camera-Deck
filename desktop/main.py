@@ -645,6 +645,9 @@ class Window(QMainWindow):
         self.run(client.probe,confirm)
 
     def remove(self,tile):
+        if self.studio.pc_jobs.get(id(tile),{}).get('state') in ('starting','recording'):
+            self.message('Запись на ПК','Сначала остановите запись и дождитесь готового файла. Затем камеру можно отключить от пульта.');return
+        self.studio.pc_jobs.pop(id(tile),None);self.studio.results.pop(id(tile),None)
         if tile.fullscreen is not None:tile.fullscreen.close()
         tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close(); self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
         # Keep QObject alive until its networking thread has observed the stop event.

@@ -55,3 +55,15 @@ def test_media_keeps_metadata_if_thumbnail_is_unavailable(tmp_path,monkeypatch):
     browser.list.setCurrentItem(browser.items[name+'.partial']);assert not browser.download.isEnabled()
     browser.list.setCurrentItem(browser.items[name]);assert browser.download.isEnabled()
     window.close()
+
+
+def test_active_pc_recording_cannot_be_orphaned_by_disconnect(tmp_path,monkeypatch):
+    app,window=make_window(tmp_path,monkeypatch)
+    class Client:host='192.168.1.2';fingerprint='a'*64
+    tile=CameraTile(window,Client(),'Phone');tile.status={'ready':True,'recording':False};window.tiles.append(tile)
+    messages=[];window.message=lambda *args:messages.append(args)
+    window.studio.pc_jobs[id(tile)]={'state':'starting'};window.remove(tile)
+    assert tile in window.tiles and messages
+    window.studio.pc_jobs[id(tile)]={'state':'complete'};window.remove(tile)
+    assert tile not in window.tiles and id(tile) not in window.studio.pc_jobs
+    window.close()
