@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
     GradientDrawable panel(int fill,int stroke,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(radius));d.setStroke(dp(1),stroke);return d;}
     TextView text(String value,int size,int color){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(color);t.setPadding(dp(6),dp(6),dp(6),dp(6));return t;}
     void buttonStyle(Button b,boolean primary){b.setTextColor(primary?BLACK:YELLOW);b.setBackground(panel(primary?YELLOW:PANEL,primary?YELLOW:0xff424242,14));b.setAlpha(b.isEnabled()?1f:0.4f);}
-    Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setTextSize(13);b.setAllCaps(false);b.setSingleLine(true);b.setAutoSizeTextTypeUniformWithConfiguration(10,13,1,android.util.TypedValue.COMPLEX_UNIT_SP);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),dp(6),dp(8),dp(6));buttonStyle(b,false);b.setOnClickListener(v->action.run());return b;}
+    Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setTextSize(13);b.setAllCaps(false);b.setMaxLines(1);b.setHorizontallyScrolling(false);b.setAutoSizeTextTypeUniformWithConfiguration(10,13,1,android.util.TypedValue.COMPLEX_UNIT_SP);b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(8),dp(6),dp(8),dp(6));buttonStyle(b,false);b.setOnClickListener(v->action.run());return b;}
     LinearLayout column(){LinearLayout c=new LinearLayout(this);c.setOrientation(LinearLayout.VERTICAL);return c;}
     LinearLayout row(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setGravity(Gravity.CENTER_VERTICAL);return r;}
     void cell(LinearLayout row,View view,int height){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(height),1);p.setMargins(dp(3),dp(3),dp(3),dp(3));row.addView(view,p);}
@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
         storage=text("",11,MUTED);storage.setOnClickListener(v->storageSettings());bottom.addView(storage);
         notice=text("",11,MUTED);notice.setMaxLines(2);bottom.addView(notice);
         LinearLayout controls=row();mode=button("Фото",()->{CameraEngine e=engine();if(e!=null)command("capture_config","mode",e.captureMode.equals("photo")?"video":"photo");});
-        shutter=button("●",()->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});shutter.setTextSize(22);
+        shutter=button("●",()->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});shutter.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE);shutter.setTextSize(22);
         cell(controls,mode,52);cell(controls,shutter,60);cell(controls,button("Объектив",this::lensSettings),52);bottom.addView(controls);
         LinearLayout menus=landscape?column():row();formatReadout=button("Качество ▴",this::captureSettings);
         for(Button menu:new Button[]{formatReadout,button("Экспозиция ▴",this::sensorSettings),button("Ещё ▴",this::powerSettings)}){
