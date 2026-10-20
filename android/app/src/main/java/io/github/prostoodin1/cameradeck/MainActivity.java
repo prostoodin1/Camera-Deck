@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
         else getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         getWindow().setStatusBarColor(BLACK);getWindow().setNavigationBarColor(BLACK);
+        boolean landscape=getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         FrameLayout root=new FrameLayout(this);root.setBackgroundColor(BLACK);setContentView(root);
         root.setOnApplyWindowInsetsListener((v,insets)->{
             int top,bottom,left,right;
@@ -67,7 +68,7 @@ public class MainActivity extends Activity {
             else{top=insets.getSystemWindowInsetTop();bottom=insets.getSystemWindowInsetBottom();left=insets.getSystemWindowInsetLeft();right=insets.getSystemWindowInsetRight();}
             v.setPadding(left,top,right,bottom);return insets;
         });
-        FrameLayout finder=new FrameLayout(this);root.addView(finder,new FrameLayout.LayoutParams(-1,-1));
+        FrameLayout finder=new FrameLayout(this);FrameLayout.LayoutParams finderLayout=new FrameLayout.LayoutParams(-1,-1);if(landscape)finderLayout.rightMargin=dp(250);root.addView(finder,finderLayout);
         nativeView=new TextureView(this);nativeView.setOpaque(false);finder.addView(nativeView,new FrameLayout.LayoutParams(-1,-1));
         nativeView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){attachPreview();}
@@ -82,7 +83,7 @@ public class MainActivity extends Activity {
         start=button("Включить",this::toggle);header.addView(start,new LinearLayout.LayoutParams(dp(112),dp(44)));
         Button link=button("Подключить",this::pairingSettings);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(116),dp(44));lp.setMargins(dp(8),0,0,0);header.addView(link,lp);top.addView(header);
         connection=text("Телефон и компьютер · одна Wi-Fi сеть",11,MUTED);connection.setOnClickListener(v->pairingSettings());top.addView(connection);
-        state=text("Камера выключена",11,YELLOW);top.addView(state);root.addView(top,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
+        state=text("Камера выключена",11,YELLOW);top.addView(state);if(landscape){connection.setVisibility(View.GONE);state.setVisibility(View.GONE);}FrameLayout.LayoutParams topLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);if(landscape)topLayout.rightMargin=dp(250);root.addView(top,topLayout);
         LinearLayout bottom=column();bottom.setPadding(dp(14),dp(8),dp(14),dp(12));bottom.setBackground(panel(0xd5060606,0x22555555,24));
         storage=text("",11,MUTED);storage.setOnClickListener(v->storageSettings());bottom.addView(storage);
         notice=text("",11,MUTED);notice.setMaxLines(2);bottom.addView(notice);
@@ -90,7 +91,7 @@ public class MainActivity extends Activity {
         shutter=button("●",()->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});shutter.setTextSize(22);
         cell(controls,mode,52);cell(controls,shutter,60);cell(controls,button("Объектив",this::lensSettings),52);bottom.addView(controls);
         LinearLayout menus=row();formatReadout=button("Качество ▴",this::captureSettings);cell(menus,formatReadout,44);cell(menus,button("Экспозиция ▴",this::sensorSettings),44);cell(menus,button("Ещё ▴",this::powerSettings),44);bottom.addView(menus);
-        telemetry=text("",11,MUTED);telemetry.setGravity(Gravity.CENTER);bottom.addView(telemetry);root.addView(bottom,new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM));
+        telemetry=text("",11,MUTED);telemetry.setGravity(Gravity.CENTER);bottom.addView(telemetry);root.addView(bottom,new FrameLayout.LayoutParams(landscape?dp(250):-1,-2,landscape?(Gravity.RIGHT|Gravity.CENTER_VERTICAL):Gravity.BOTTOM));
         isoReadout=button("",this::sensorSettings);shutterReadout=button("",this::sensorSettings);
         localPreview=check("Показывать камеру",true);localPreview.setOnCheckedChangeListener((v,value)->{showPreview=value;CameraEngine e=engine();if(!value&&e!=null)e.hideLocal();sequence=-1;});
         orientation=new OrientationEventListener(this){public void onOrientationChanged(int degrees){

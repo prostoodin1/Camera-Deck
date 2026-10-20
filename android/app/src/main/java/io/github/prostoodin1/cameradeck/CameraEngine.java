@@ -261,6 +261,7 @@ final class CameraEngine implements AutoCloseable {
                 if (closed) { s.close(); return; }
                 session = s;
                 try {
+                    if(!localRejected&&output!=localOutput){configure(video);return;}
                     nativePreview=output!=null&&output==localOutput;
                     request = camera.createCaptureRequest(video ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
                     request.addTarget(preview.getSurface());
