@@ -154,6 +154,10 @@ public class CameraService extends Service {
 
     final class Api extends NanoHTTPD {
         Api(SSLServerSocketFactory ssl) { super(PORT); makeSecure(ssl, new String[]{"TLSv1.2"}); }
+        @Override protected ClientHandler createClientHandler(Socket socket,InputStream input){
+            try{socket.setTcpNoDelay(true);socket.setSendBufferSize(64*1024);}catch(SocketException ignored){}
+            return super.createClientHandler(socket,input);
+        }
         Response json(Response.Status code, JSONObject body) { Response r = newFixedLengthResponse(code, "application/json", body.toString()); r.addHeader("Cache-Control", "no-store"); return r; }
         Response error(Response.Status code, String message) { try { return json(code, new JSONObject().put("error", message)); } catch (Exception e) { return newFixedLengthResponse(code, "text/plain", "Error"); } }
         JSONObject body(IHTTPSession s) throws Exception {
@@ -198,15 +202,16 @@ public class CameraService extends Service {
                     final LiveVideo video;try{video=engine.subscribeVideo();}catch(Exception e){viewers.decrementAndGet();return error(Response.Status.NOT_IMPLEMENTED,"H.264 недоступен: "+e.getMessage());}
                     final String videoToken=auth.substring(7);final CameraEngine owner=engine;
                     InputStream stream=new InputStream(){
-                        byte[] part=new byte[0];int offset;long previous=-1;boolean ended;
+                        byte[] part=new byte[0];int offset;long previous=-1,partStarted;boolean ended;
                         public int read()throws IOException{byte[] b=new byte[1];return read(b,0,1)<0?-1:b[0]&255;}
                         public int read(byte[] b,int off,int len)throws IOException{
                             if(len==0)return 0;
                             while(offset==part.length){Long expiry=tokens.get(videoToken);if(ended||!running||owner.closed||video.closed||!video.error.isEmpty()||expiry==null||expiry<System.currentTimeMillis()){close();return -1;}
+                                if(partStarted>0){video.feedback(SystemClock.elapsedRealtime()-partStarted);partStarted=0;}
                                 owner.demandRemote();LiveVideo.Packet packet;try{packet=video.next(previous);}catch(InterruptedException e){Thread.currentThread().interrupt();close();return -1;}if(packet==null)continue;
                                 previous=packet.sequence();byte[] metadata;
                                 try{metadata=owner.trackingStatus().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);}catch(Exception e){metadata=new byte[]{123,125};}
-                                java.nio.ByteBuffer out=java.nio.ByteBuffer.allocate(24+metadata.length+packet.bytes().length);out.putInt(packet.bytes().length).putLong(packet.pts()).putInt(owner.rotation).putInt(packet.key()?1:0).putInt(metadata.length).put(metadata).put(packet.bytes());part=out.array();offset=0;
+                                java.nio.ByteBuffer out=java.nio.ByteBuffer.allocate(24+metadata.length+packet.bytes().length);out.putInt(packet.bytes().length).putLong(packet.pts()).putInt(owner.rotation).putInt(packet.key()?1:0).putInt(metadata.length).put(metadata).put(packet.bytes());part=out.array();offset=0;partStarted=SystemClock.elapsedRealtime();
                             }int n=Math.min(len,part.length-offset);System.arraycopy(part,offset,b,off,n);offset+=n;return n;
                         }
                         public void close(){if(!ended){ended=true;viewers.decrementAndGet();owner.unsubscribeVideo(video);updatePower();}}

@@ -9,4 +9,7 @@ Camera Deck source is distributed under GPL-3.0-only. The public Windows executa
 - CPython 3.13: Python Software Foundation License. https://docs.python.org/3/license.html
 - PyInstaller bootloader: GPL with its distribution exception. https://pyinstaller.org/en/stable/license.html
 
+- PyAV 19.0.1: BSD-3-Clause; packaged FFmpeg components have their own LGPL/GPL notices and corresponding source at https://github.com/PyAV-Org/PyAV and https://ffmpeg.org/download.html. The PyAV wheel build configuration/source is maintained at https://github.com/PyAV-Org/pyav-wheels. See bundled third_party_licenses/av-19.0.1.
+- Google ML Kit face-detection 16.1.7 (bundled model), Google Play services / AndroidX transitive dependencies: https://developers.google.com/ml-kit/terms and their Maven POM license notices. Faces are processed locally. This SDK is an external dependency, not Camera Deck source.
+
 The Android package uses Android system APIs. Development-only JUnit and JSON-java dependencies are not included in release APKs. No production signing private keys, Android keystores, user recordings or GitHub credentials are included in this repository.

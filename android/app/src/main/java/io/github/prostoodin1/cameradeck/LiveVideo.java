@@ -16,9 +16,11 @@ final class LiveVideo implements AutoCloseable {
     volatile boolean closed;
     volatile String error="";
     byte[] config=new byte[0];long sequence,lastSync;int buffered;
+    int bitrate,ceiling;long adjusted;
     final Thread worker;
     LiveVideo(int width,int height,int fps)throws Exception{
         this.width=width;this.height=height;this.fps=fps;
+        bitrate=ceiling=width>=1920?12_000_000:6_000_000;
         MediaFormat f=AvRecorder.basicFormat(MediaFormat.MIMETYPE_VIDEO_AVC,width,height,fps,width>=1920?12_000_000:6_000_000);
         f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1);f.setInteger(MediaFormat.KEY_LATENCY,0);
         f.setFloat(MediaFormat.KEY_MAX_FPS_TO_ENCODER,fps);
@@ -46,6 +48,13 @@ final class LiveVideo implements AutoCloseable {
         }}catch(Exception e){if(!closed)error=e.toString();}finally{synchronized(this){notifyAll();}}
     }
     synchronized void sync(){long now=SystemClock.elapsedRealtime();if(closed||now-lastSync<250)return;lastSync=now;Bundle b=new Bundle();b.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME,0);try{codec.setParameters(b);}catch(Exception ignored){}}
+    synchronized void feedback(long transferMs){
+        long now=SystemClock.elapsedRealtime();if(closed||now-adjusted<2000)return;
+        int next=bitrate;
+        if(transferMs>150)next=Math.max(750_000,bitrate*3/4);
+        else if(transferMs<40&&now-adjusted>10000)next=Math.min(ceiling,bitrate+Math.max(100_000,bitrate/10));
+        if(next!=bitrate){Bundle b=new Bundle();b.putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE,next);try{codec.setParameters(b);bitrate=next;adjusted=now;}catch(Exception ignored){adjusted=now;}}
+    }
     synchronized Packet next(long previous)throws InterruptedException{
         if(closed||!error.isEmpty())return null;
         boolean behind=packets.isEmpty()||previous<packets.peekFirst().sequence-1;
