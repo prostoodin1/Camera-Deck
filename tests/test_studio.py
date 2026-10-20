@@ -32,6 +32,8 @@ def test_workspaces_preserve_selection_and_show_confirmed_state(tmp_path,monkeyp
     assert window.studio.table.item(0,2).text()=='Готово'
     window.studio.navigate(0);app.processEvents();assert tile.preview_enabled.is_set()
     assert window.studio.selected is tile
+    from PyQt6.QtCore import QPersistentModelIndex
+    persistent=QPersistentModelIndex(window.studio.selection.model().index(0,0));window.studio.refresh();assert persistent.isValid()
     window.close()
 
 

@@ -88,7 +88,9 @@ class Studio(QWidget):
         self.navigate(0)
 
     def navigate(self,index):
-        if index!=3:self.media.player.pause()
+        if index!=3:
+            self.media.player.pause()
+            if self.workspace==3:self.media.epoch+=1
         self.workspace=index;self.pages.setCurrentIndex(0 if index<2 else index-1);self.inspector.setVisible(index==1)
         self.title.setText(('Мониторинг','Управление камерой','Съёмочная группа','Материалы')[index])
         for i,b in enumerate(self.nav):b.setChecked(i==index)
@@ -118,12 +120,16 @@ class Studio(QWidget):
         tiles=self.window.tiles
         if self.selected not in tiles:self.selected=next((t for t in tiles if getattr(t.client,"fingerprint",t.client.host)==self.saved_selection),tiles[0] if tiles else None)
         if self.workspace==3 and self.media.camera is not self.selected:self.media.set_camera(self.selected)
-        self.selection.blockSignals(True);self.selection.clear()
-        for tile in tiles:self.selection.addItem(tile.name.text(),tile)
+        self.selection.blockSignals(True)
+        entries=[(tile.name.text(),tile) for tile in tiles]
+        if entries!=[(self.selection.itemText(i),self.selection.itemData(i)) for i in range(self.selection.count())]:
+            self.selection.clear()
+            for name,tile in entries:self.selection.addItem(name,tile)
         if self.selected:self.selection.setCurrentIndex(tiles.index(self.selected))
         self.selection.blockSignals(False)
         s=self.selected.status if self.selected else {}
         self.status.setText(('Запись идёт' if s.get('recording') else 'Готово' if s.get('ready') else 'Ожидаем состояние')+('\n'+s['error'] if s.get('error') else ''))
+        if s.get('trackingAvailable') is False:self.status.setText(self.status.text()+'\nВ этом режиме записи анализ лица и автозум недоступны')
         if s.get('recording'):
             self.status.setText(self.status.text()+('\nЗвук: аудиодорожка активна' if s.get('audioRecordingActive') else '\nЗвук: ожидаем дорожку' if s.get('audio') else '\nЗапись без звука'))
         if s.get('micCapturing') and s.get('micLevelDb') is not None:self.status.setText(self.status.text()+f"\nМикрофон: {s['micLevelDb']:.1f} dBFS")
