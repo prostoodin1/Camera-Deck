@@ -203,7 +203,7 @@ final class CameraEngine implements AutoCloseable {
     void applyDemand(boolean force) throws Exception {
         if (session == null || request == null || busy || photoPending || closed) return;
         PowerPolicy.Plan plan = power.plan(SystemClock.elapsedRealtime(), recording);
-        int fps = recording ? videoFps : (liveUsers>0&&live!=null?live.fps:nativePreview?30:power.fps());
+        int fps = recording ? videoFps : (liveUsers>0&&live!=null?Math.min(live.fps,power.eco?30:live.fps):nativePreview?30:power.fps());
         int demand=(power.localPreview(SystemClock.elapsedRealtime())?1:0)|(power.remotePreview(SystemClock.elapsedRealtime())?2:0)|(liveUsers>0?4:0);
         if (!force && plan == appliedPlan && fps == appliedFps && demand==appliedDemand) return;
         if (plan == PowerPolicy.Plan.STANDBY) {
@@ -511,7 +511,7 @@ final class CameraEngine implements AutoCloseable {
         JSONObject o = new JSONObject().put("ready", ready).put("recording", recording).put("photoPending",photoPending).put("error", error)
             .put("cameraId", cameraId).put("rotation", rotation).put("frameTime", frameTime).put("frameSequence", frameSequence)
             .put("iso", measuredIso).put("exposureNs", measuredExposure).put("manualIso", iso).put("manualExposureNs", exposure).put("focus", focus)
-            .put("lastFile", lastFile).put("audio", sound).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "JPEG 640px / up to 10fps");
+            .put("lastFile", lastFile).put("audio", sound).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility");
         o.put("zoom",zoom).put("zoomMin",minZoom).put("zoomMax",maxZoom).put("autoZoom",autoZoom).put("framing",framing).put("tracking",tracking).put("faceFocus",faceFocus).put("faces",SystemClock.elapsedRealtime()-facesAt<800?faces:new JSONArray()).put("afState",afState).put("trackingError",trackingError).put("streamProfile",liveProfile);
         if(focusPoint!=null)o.put("focusPoint",new JSONArray().put(focusPoint[0]).put(focusPoint[1]));
         o.put("mode",captureMode).put("videoWidth",videoWidth).put("videoHeight",videoHeight).put("videoFps",videoFps)
