@@ -119,7 +119,11 @@ public class CameraService extends Service {
         // Let Android select aliases and signature algorithms for its own keystore.
         KeyManagerFactory managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         managers.init(store, null);
-        SSLContext ssl = SSLContext.getInstance("TLS"); ssl.init(managers.getKeyManagers(), null, random);
+        X509KeyManager manager=null;
+        for(KeyManager candidate:managers.getKeyManagers())if(candidate instanceof X509KeyManager)manager=(X509KeyManager)candidate;
+        if(manager==null)throw new GeneralSecurityException("No X509 key manager");
+        SSLContext ssl = SSLContext.getInstance("TLS");
+        ssl.init(new KeyManager[]{new TlsKeyManager(manager,alias)}, null, random);
         return ssl.getServerSocketFactory();
     }
     static String hex(byte[] bytes) { StringBuilder s = new StringBuilder(); for (byte b : bytes) s.append(String.format(Locale.US, "%02x", b & 255)); return s.toString(); }
