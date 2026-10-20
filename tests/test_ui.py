@@ -82,6 +82,29 @@ def test_discovery_cards_connect_to_the_selected_phone(tmp_path,monkeypatch):
     window.close()
 
 
+def test_iso_popup_keeps_exposure_paired_with_manual_iso(tmp_path,monkeypatch):
+    import updates,threading
+    from PyQt6.QtWidgets import QDialog
+    from appearance import Toggle,SliderField
+    monkeypatch.setattr(updates,"DATA",tmp_path)
+    monkeypatch.setattr(threading.Thread,"start",lambda self:None)
+    app=QApplication.instance() or QApplication([])
+    window=Window(auto_checks=False);commands=[]
+    class Client:
+        host="192.168.1.2"
+        def command(self,action,**values):commands.append((action,values))
+    tile=CameraTile(window,Client(),"Phone");tile.status={"manualSensor":True,"isoMin":50,"isoMax":3200,"iso":100,"exposureNs":10000000,"focus":-1}
+    window.run=lambda fn,callback:callback(fn())
+    def choose(dialog):
+        dialog.findChild(Toggle).setChecked(False)
+        dialog.findChild(SliderField).slider.setValue(10000)
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(QDialog,"exec",choose)
+    tile.quick_sensor("iso",tile.iso_readout)
+    assert commands==[("settings",{"iso":3200,"exposureNs":10000000,"focus":-1})]
+    tile.stopped.set();tile.monitor.stop();window.close()
+
+
 def test_capture_settings_keep_fps_and_raw_sizes_in_supported_mode(tmp_path,monkeypatch):
     import updates,threading
     from PyQt6.QtWidgets import QComboBox,QDialog

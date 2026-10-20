@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 import math
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal, QPoint
 from PyQt6.QtGui import QCloseEvent, QImage, QPixmap, QTransform, QFontDatabase, QFont
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -66,8 +66,8 @@ class CameraTile(QWidget):
         self.focus_readout=DropdownButton("AF");self.profile_readout=DropdownButton("—")
         for button in (self.iso_readout,self.shutter_readout,self.focus_readout,self.profile_readout):
             button.setObjectName("readout");readings.addWidget(button)
-        self.iso_readout.clicked.connect(lambda:self.settings(1));self.shutter_readout.clicked.connect(lambda:self.settings(1))
-        self.focus_readout.clicked.connect(lambda:self.settings(1));self.profile_readout.clicked.connect(lambda:self.settings(0))
+        self.iso_readout.clicked.connect(lambda:self.quick_sensor("iso",self.iso_readout));self.shutter_readout.clicked.connect(lambda:self.quick_sensor("shutter",self.shutter_readout))
+        self.focus_readout.clicked.connect(lambda:self.quick_sensor("focus",self.focus_readout));self.profile_readout.clicked.connect(lambda:self.settings(0))
         box.addLayout(readings)
         self.info = QLabel(client.host)
         self.info.setWordWrap(True);self.info.setStyleSheet("color:#858585;font-size:11px")
@@ -219,6 +219,36 @@ class CameraTile(QWidget):
     def command(self, action, **kwargs):
         self.window.run(lambda: self.client.command(action, **kwargs), lambda _: self.info.setText("Команда принята; ожидаем состояние камеры…"))
 
+    def quick_sensor(self,kind,anchor):
+        s=self.status
+        if not s:return
+        dialog=GlassSheet(self.window);dialog.setMinimumWidth(360);layout=QVBoxLayout(dialog);layout.setContentsMargins(24,24,24,24);layout.setSpacing(18)
+        title=QLabel({"iso":"Чувствительность ISO","shutter":"Выдержка","focus":"Фокус"}[kind]);title.setStyleSheet("font-size:19px;font-weight:600");layout.addWidget(title)
+        auto=Toggle("Автоматически");auto.setChecked(s.get("focus",-1)<0 if kind=="focus" else not s.get("manualIso"));layout.addWidget(auto)
+        supported=bool(s.get("focusMax")) if kind=="focus" else s.get("manualSensor",False)
+        if kind=="iso":field=SliderField(s.get("isoMin",50),s.get("isoMax",6400),s.get("manualIso") or s.get("iso",100))
+        elif kind=="shutter":
+            maximum=s.get("exposureMaxNs",100000000)/1e6
+            if s.get("recording"):maximum=min(maximum,1000/max(1,s.get("videoFps",30)))
+            field=SliderField(max(.0001,s.get("exposureMinNs",1000)/1e6),maximum,(s.get("manualExposureNs") or s.get("exposureNs",10000000))/1e6,3,True)
+            layout.addWidget(QLabel("Миллисекунды"))
+        else:field=SliderField(0,s.get("focusMax") or 0,max(0,s.get("focus",-1)),2)
+        layout.addWidget(field);auto.setEnabled(supported);field.setEnabled(supported and not auto.isChecked());auto.toggled.connect(lambda checked:field.setEnabled(supported and not checked))
+        if not supported:layout.addWidget(QLabel("Ручная настройка не предоставлена этой камерой"))
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Применить");buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Закрыть")
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        dialog.adjustSize();point=anchor.mapToGlobal(QPoint(0,anchor.height()+8));screen=QApplication.screenAt(point) or QApplication.primaryScreen();bounds=screen.availableGeometry()
+        dialog.move(max(bounds.left(),min(point.x(),bounds.right()-dialog.width())),point.y() if point.y()+dialog.height()<bounds.bottom() else anchor.mapToGlobal(QPoint()).y()-dialog.height()-8)
+        if dialog.exec()!=QDialog.DialogCode.Accepted or not supported:return
+        iso=s.get("manualIso",0);exposure=s.get("manualExposureNs",0);focus=s.get("focus",-1)
+        if kind=="focus":focus=-1 if auto.isChecked() else field.value()
+        elif auto.isChecked():iso=0;exposure=0
+        else:
+            iso=field.value() if kind=="iso" else (iso or s.get("iso") or s.get("isoMin",100))
+            exposure=round(field.value()*1e6) if kind=="shutter" else (exposure or s.get("exposureNs") or 10000000)
+        self.command("settings",iso=iso,exposureNs=exposure,focus=focus)
+
     def settings(self,initial_tab=0):
         if not self.status: return
         status = self.status
@@ -296,6 +326,7 @@ class CameraTile(QWidget):
         note = QLabel("При смене объектива сначала примените выбор, затем откройте настройки снова.\nДоступные диапазоны сообщает сам телефон.")
         note.setWordWrap(True); form.addRow(note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Применить");buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
         buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); outer.addWidget(buttons)
         if dialog.exec() != QDialog.DialogCode.Accepted: return
         if cameras.currentData() != status.get("cameraId"):

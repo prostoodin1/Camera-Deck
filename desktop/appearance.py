@@ -82,6 +82,11 @@ QTabWidget::pane,QStackedWidget,QWidget#settingsPage {background:#111111;border:
 QTabBar::tab {background:#191919;color:#999999;padding:9px 17px;border-bottom:2px solid #2c2c2c}
 QTabBar::tab:selected {background:#29251c;color:#ffd76b;border-bottom:2px solid #ffd76b}
 QToolTip {background:#202020;color:#ffd76b;border:1px solid #505050}
+QSlider::groove:horizontal {height:4px;background:#3a3a3a;border-radius:2px}
+QSlider::sub-page:horizontal {background:#ffd76b;border-radius:2px}
+QSlider::handle:horizontal {width:16px;height:16px;margin:-6px 0;background:#f5f5f5;border:1px solid #999999;border-radius:8px}
+QSlider::sub-page:horizontal:disabled {background:#555555}
+QSlider::handle:horizontal:disabled {background:#777777;border-color:#777777}
 """
 
 
