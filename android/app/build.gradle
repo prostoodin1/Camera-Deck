@@ -31,9 +31,9 @@ android {
         debug {
             if (previewBuild) {
                 applicationIdSuffix '.aurora'
-                versionNameSuffix '-prism-preview'
+                versionNameSuffix '-orbit-preview'
                 buildConfigField 'boolean', 'PREVIEW_BUILD', 'true'
-                manifestPlaceholders = [appLabel: 'Camera Deck Prism']
+                manifestPlaceholders = [appLabel: 'Camera Deck Orbit']
             }
         }
         release { signingConfig signingConfigs.release; minifyEnabled false }

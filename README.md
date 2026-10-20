@@ -1,12 +1,12 @@
-# Camera Deck · Prism
+# Camera Deck · Orbit
 
-Android phone cameras controlled from a Windows desk. Release **Prism**, version **0.7.1 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
+Android phone cameras controlled from a Windows desk. Release **Orbit**, version **0.7.2 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Camera options come from Camera2 and encoder capabilities, without a manufacturer allowlist or an artificial 4K/24 MP limit. Physical-phone and physical-USB validation remains necessary.
 
-Prism names this release; Camera Deck is the application. Internal `.aurora` package, cryptographic channel identifiers and keys are retained so updates preserve installed apps, recordings and trusted clients. Future releases use their own names from `version.json`.
+Orbit names this release; Camera Deck is the application. Internal `.aurora` package, cryptographic channel identifiers and keys are retained so updates preserve installed apps, recordings and trusted clients. Future releases use their own names from `version.json`.
 
 ## Installation and first connection
 
-Install `CameraDeck-Prism-Android.apk` over Aurora and run `CameraDeck-Prism-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
+Install `CameraDeck-Orbit-Android.apk` over Aurora and run `CameraDeck-Orbit-Windows.exe`. Do not uninstall Aurora: uninstalling removes its private recordings and trusted computers. Original Camera Deck and the earlier `.preview` remain separate applications; stop their camera before starting Aurora.
 
 Connect both devices to the same Wi-Fi. On the phone press **Включить**, grant camera/microphone permissions, then open **Подключить**. On Windows choose the discovered phone, compare the entire SHA-256 fingerprint and enter its PIN. Manual local IP entry is available when broadcast discovery is blocked.
 
@@ -21,6 +21,10 @@ With **Доверять этому компьютеру** selected, subsequent d
 - Each camera opens independently fullscreen; Esc returns. The main window starts windowed. Menus manage devices, layout and updates.
 
 This is not WebRTC, and zero delay, 60 fps on every phone, perfect audio/video sync, or physical Wi-Fi performance is not promised. Live PCM audio is separate and not lip-synchronized. Enabling face analysis also consumes CPU; disable it when maximum preview throughput matters.
+
+## Viewer rotation
+
+Each camera has **Повернуть 90°** and **Блок. поворот**, also available fullscreen. Manual rotation is applied to the original decoded frame, including face overlays and tap-to-focus coordinates. Lock freezes automatic orientation while manual rotation remains available. Settings persist per pinned phone identity. Viewer controls do not modify the phone recording. Update Android as well: Orbit fixes the reversed OrientationEventListener sign that inverted landscape streams by 180 degrees.
 
 ## Framing, zoom and focus
 

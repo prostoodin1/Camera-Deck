@@ -20,6 +20,7 @@ from appearance import THEME,Viewfinder,shutter_label,GlassSheet,Toggle,SliderFi
 import updates
 import trusted
 import live_video
+import rotation as viewer_rotation
 
 
 class Result(QObject):
@@ -44,6 +45,9 @@ class CameraTile(QWidget):
         self.status = {}
         self.failures = 0
         self.fullscreen=None
+        self.full_rotation_lock=None;self.last_raw=None
+        self.rotation_identity=getattr(client,"fingerprint","") or client.host
+        self.rotation=viewer_rotation.load(self.rotation_identity)
         self.frame_lock=threading.Lock();self.pending_frame=None
         self.display_count=0;self.display_epoch=time.monotonic();self.measured_fps=0;self.transport="—"
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
@@ -98,7 +102,7 @@ class CameraTile(QWidget):
         switches.addWidget(self.view_toggle)
         self.listen=Toggle("Слушать звук");self.listen.setToolTip("Слушать микрофон телефона; звук в записи настраивается отдельно")
         self.listen.toggled.connect(self.sync_audio)
-        switches.addWidget(self.listen);switches.addStretch();box.addLayout(switches)
+        switches.addWidget(self.listen);switches.addStretch();self.rotation_lock=self.rotation_controls(switches);box.addLayout(switches)
         self.monitor=AudioMonitor(client,self);self.monitor.failed.connect(self.audio_failed)
         self.phone_update = QPushButton("Обновить Android")
         self.phone_update.setEnabled(False)
@@ -151,14 +155,32 @@ class CameraTile(QWidget):
             except Exception as exc:self.audio_failed(str(exc))
         else:self.monitor.stop()
 
+    def rotation_controls(self,layout):
+        turn=QPushButton("Повернуть 90°");turn.setToolTip("Повернуть изображение этой камеры по часовой стрелке");turn.clicked.connect(self.rotate_picture);layout.addWidget(turn)
+        lock=Toggle("Блок. поворот");lock.setToolTip("Сохранить ориентацию изображения при повороте телефона");lock.setChecked(self.rotation.locked_base is not None);lock.toggled.connect(self.lock_rotation);layout.addWidget(lock);return lock
+
+    def save_rotation(self):
+        try:viewer_rotation.save(self.rotation_identity,self.rotation)
+        except OSError as exc:self.info.setText("Не удалось сохранить поворот: "+str(exc))
+
+    def rotate_picture(self):
+        self.rotation.turn();self.save_rotation();self.render_last_frame()
+
+    def lock_rotation(self,value):
+        self.rotation.lock(value)
+        for control in (self.rotation_lock,self.full_rotation_lock):
+            if control is not None:control.blockSignals(True);control.setChecked(value);control.blockSignals(False)
+        self.save_rotation();self.render_last_frame()
+
     def open_fullscreen(self):
         if self.fullscreen is not None:self.fullscreen.raise_();return
         dialog=QDialog(self.window);dialog.setWindowTitle(self.name.text());dialog.setStyleSheet(THEME)
-        layout=QVBoxLayout(dialog);bar=QHBoxLayout();bar.addWidget(QLabel(self.name.text()));bar.addStretch();close=QPushButton("Выйти из полного экрана · Esc");close.clicked.connect(dialog.close);bar.addWidget(close);layout.addLayout(bar)
+        layout=QVBoxLayout(dialog);bar=QHBoxLayout();bar.addWidget(QLabel(self.name.text()));bar.addStretch();self.full_rotation_lock=self.rotation_controls(bar);close=QPushButton("Выйти из полного экрана · Esc");close.clicked.connect(dialog.close);bar.addWidget(close);layout.addLayout(bar)
         view=Viewfinder();view.on_focus=self.video.on_focus;layout.addWidget(view,1);view.set_status(self.status)
+        view.frame_rotation=self.video.frame_rotation
         if self.video.frame is not None:view.set_frame(self.video.frame)
         self.fullscreen=dialog;self.full_view=view
-        def finished():self.fullscreen=None;self.full_view=None;dialog.deleteLater();self.window.rebuild()
+        def finished():self.fullscreen=None;self.full_view=None;self.full_rotation_lock=None;dialog.deleteLater();self.window.rebuild()
         dialog.finished.connect(finished);dialog.showFullScreen();self.set_preview_active(True)
 
     def display_latest(self):
@@ -167,7 +189,12 @@ class CameraTile(QWidget):
         self.display_count+=1;elapsed=time.monotonic()-self.display_epoch
         if elapsed>=1:self.measured_fps=self.display_count/elapsed;self.display_count=0;self.display_epoch=time.monotonic()
         self.status['viewFps']=round(self.measured_fps);self.status['transport']=self.transport
-        image,rotation=pending
+        image,rotation=pending;self.last_raw=image;self.rotation.angle(rotation)
+        self.render_last_frame()
+
+    def render_last_frame(self):
+        if self.last_raw is None:return
+        image=self.last_raw;rotation=self.rotation.angle()
         if rotation:image=image.transformed(QTransform().rotate(rotation),Qt.TransformationMode.SmoothTransformation)
         self.video.frame_rotation=rotation
         tracking=getattr(self.client,'live_tracking',{})
@@ -230,7 +257,8 @@ class CameraTile(QWidget):
         self.show_status(status)
         image = QImage.fromData(data)
         if image.isNull(): return
-        self.video.set_frame(image.transformed(QTransform().rotate(status.get("rotation", 0))))
+        with self.frame_lock:self.pending_frame=(image,status.get("rotation",0))
+        self.display_latest()
 
     def show_status(self, status):
         self.status = status
@@ -416,7 +444,7 @@ class Window(QMainWindow):
         self.setStyleSheet(THEME)
         root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(24,22,24,18);layout.setSpacing(16)
         brand=QHBoxLayout()
-        title = QLabel("Camera Deck Prism"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
+        title = QLabel("Camera Deck Orbit"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
         subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#a5a5a5");brand.addWidget(subtitle);brand.addStretch()
         self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#ffd76b");brand.addWidget(self.connection_count)
         self.devices_button=QPushButton("Устройства");self.devices_button.setCheckable(True);self.devices_button.setChecked(True)
@@ -448,7 +476,7 @@ class Window(QMainWindow):
         devices_menu=menu.addMenu("Устройства");devices_menu.addAction("Найти телефоны",self.scan_devices);devices_menu.addAction("Подключиться по IP",self.manual);devices_menu.addAction("Доверенные телефоны",self.trusted_devices)
         view_menu=menu.addMenu("Вид");view_menu.addAction("Показать / скрыть телефоны",lambda:self.devices_button.click())
         for n in range(1,4):view_menu.addAction(f"{n} колонка",lambda checked=False,n=n:self.columns.setCurrentIndex(n-1))
-        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True));system_menu.addAction("О программе",lambda:self.message("Camera Deck Prism","H.264 через защищённое соединение · зум и композиция · доверенные устройства.\nЗапись сохраняется на телефоне в исходном качестве."))
+        system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True));system_menu.addAction("О программе",lambda:self.message("Camera Deck Orbit","H.264 через защищённое соединение · зум и композиция · доверенные устройства.\nЗапись сохраняется на телефоне в исходном качестве."))
         self.refresh_devices()
         self.empty = QLabel("<span style='font-size:34px;color:#f4f4f4'>Ваша камера. Больше возможностей.</span><br><br>"
             "Подключите Android-телефон любой марки<br><br>"

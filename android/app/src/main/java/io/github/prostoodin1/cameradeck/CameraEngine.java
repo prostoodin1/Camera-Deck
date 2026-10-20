@@ -191,7 +191,7 @@ final class CameraEngine implements AutoCloseable {
             cameraId=ids[0];
         }
         handler.post(() -> { try { open(cameraId); } catch (Exception e) { fail(e); } });
-        orientation=new android.view.OrientationEventListener(c){public void onOrientationChanged(int degrees){if(degrees<0||characteristics==null)return;deviceRotation=((degrees+45)/90*90)%360;Integer sensor=characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);boolean front=Integer.valueOf(0).equals(characteristics.get(CameraCharacteristics.LENS_FACING));rotation=((sensor==null?90:sensor)+(front?deviceRotation:-deviceRotation)+360)%360;}};orientation.enable();
+        orientation=new android.view.OrientationEventListener(c){public void onOrientationChanged(int degrees){if(degrees<0||characteristics==null)return;deviceRotation=((degrees+45)/90*90)%360;Integer sensor=characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);boolean front=Integer.valueOf(0).equals(characteristics.get(CameraCharacteristics.LENS_FACING));rotation=Framing.cameraRotation(sensor==null?90:sensor,deviceRotation,front);}};orientation.enable();
         handler.postDelayed(powerTick, 1000);
     }
 
@@ -264,7 +264,7 @@ final class CameraEngine implements AutoCloseable {
         }
         int sensor = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
         boolean front = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT;
-        rotation = (sensor + (front ? deviceRotation : -deviceRotation) + 360) % 360;
+        rotation = Framing.cameraRotation(sensor,deviceRotation,front);
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         Size p = choose(map.getOutputSizes(ImageFormat.YUV_420_888), 960, 540);
         previewWidth=p.getWidth();previewHeight=p.getHeight();
