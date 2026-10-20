@@ -28,6 +28,7 @@ public class MainActivity extends Activity {
     SurfaceTexture attachedTexture;
     TextView storage;
     long nextStorageRefresh;
+    long transformKey=Long.MIN_VALUE;
     Button start,shutter,mode,isoReadout,shutterReadout,formatReadout,install;
     CheckBox localPreview,eco;
     boolean resumed,commandPending,showPreview=true;
@@ -207,7 +208,20 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==20&&result==RESULT_OK&&data!=null&&data.getData()!=null){try{CameraEngine e=engine();if(e!=null&&(e.recording||e.photoPending)){toast("Запись продолжается: папка не изменена");return;}Uri tree=data.getData();int flags=data.getFlags()&(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);if(flags!=(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION))throw new java.io.IOException("Нужен доступ к чтению и записи");getContentResolver().takePersistableUriPermission(tree,Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION);getSharedPreferences("deck",0).edit().putString("captureTree",tree.toString()).apply();nextStorageRefresh=0;toast("Папка сохранения выбрана");}catch(Exception ex){toast("Папка недоступна: "+ex.getMessage());}}}
     void attachPreview(){CameraEngine e=engine();if(e!=null&&nativeView.isAvailable()&&e!=attachedEngine){attachedEngine=e;attachedTexture=nativeView.getSurfaceTexture();e.attachLocal(attachedTexture);}}
-    void transformPreview(){CameraEngine e=engine();if(e==null||!nativeView.isAvailable()||e.previewWidth==0)return;float w=nativeView.getWidth(),h=nativeView.getHeight();if(w==0||h==0)return;float bw=e.previewWidth,bh=e.previewHeight,rw=e.rotation%180==0?bw:bh,rh=e.rotation%180==0?bh:bw;float scale=Math.min(w/rw,h/rh);Matrix m=new Matrix();m.setScale(bw/w,bh/h);m.postTranslate(-bw/2,-bh/2);m.postRotate(e.rotation);boolean front=e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));m.postScale(front?-scale:scale,scale);m.postTranslate(w/2,h/2);nativeView.setTransform(m);}
+    void transformPreview(){
+        CameraEngine e=engine();if(e==null||!nativeView.isAvailable()||e.previewWidth==0)return;
+        int width=nativeView.getWidth(),height=nativeView.getHeight(),display=getWindowManager().getDefaultDisplay().getRotation();if(width==0||height==0)return;
+        long key=Objects.hash(width,height,e.previewWidth,e.previewHeight,display,e.cameraId);if(key==transformKey)return;transformKey=key;
+        // TextureView already applies the camera producer's sensor transform.
+        // Apply only display rotation and aspect correction, not sensor rotation twice.
+        float bw=e.previewWidth,bh=e.previewHeight;boolean swap=(e.rotation%180)!=0;
+        float rw=swap?bh:bw,rh=swap?bw:bh,scale=Math.min(width/rw,height/rh);
+        Matrix m=new Matrix();m.setScale(rw*scale/width,rh*scale/height,width/2f,height/2f);
+        if(display!=0)m.postRotate(-display*90,width/2f,height/2f);
+        boolean front=e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));if(front)m.postScale(-1,1,width/2f,height/2f);
+        nativeView.setTransform(m);
+    }
+
 
     void toggle(){if(CameraService.active!=null){stopService(new Intent(this,CameraService.class));return;}if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO},10);return;}startCameraService();}
     void startCameraService(){if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);startForegroundService(new Intent(this,CameraService.class));}
@@ -218,7 +232,7 @@ public class MainActivity extends Activity {
         start.setText(active?"Выключить":"Включить");buttonStyle(start,!active);
         if(install!=null){install.setEnabled(new File(getFilesDir(),"update.apk").isFile()&&(!active||(!e.recording&&!e.photoPending)));buttonStyle(install,false);}
         mode.setEnabled(active&&e.ready&&!e.recording&&!e.photoPending&&!commandPending);shutter.setEnabled(active&&e.ready&&!e.photoPending&&!commandPending);
-        if(!active){preview.setVisibility(View.VISIBLE);storage.setText("Память телефона · "+android.text.format.Formatter.formatFileSize(this,new File(getExternalFilesDir(null),"captures").getUsableSpace())+" свободно");connection.setText("Включите камеру — изображение и PIN появятся здесь");state.setText("Камера выключена");telemetry.setText("ISO —     S —     AF");center.setText("Камера готова к работе\nНажмите «Включить» и разрешите доступ");center.setVisibility(View.VISIBLE);preview.setImageDrawable(null);sequence=-1;notice.setText(CameraService.lastStartupError.isEmpty()?"Оригиналы сохраняются на телефоне":CameraService.lastStartupError);if(code!=null)code.setText("Камера выключена");return;}
+        if(!active){preview.setVisibility(View.VISIBLE);storage.setText("Память телефона · "+android.text.format.Formatter.formatFileSize(this,getExternalFilesDir(null).getUsableSpace())+" свободно");connection.setText("Включите камеру — изображение и PIN появятся здесь");state.setText("Камера выключена");telemetry.setText("ISO —     S —     AF");center.setText("Камера готова к работе\nНажмите «Включить» и разрешите доступ");center.setVisibility(View.VISIBLE);preview.setImageDrawable(null);sequence=-1;notice.setText(CameraService.lastStartupError.isEmpty()?"Оригиналы сохраняются на телефоне":CameraService.lastStartupError);if(code!=null)code.setText("Камера выключена");return;}
         if(System.currentTimeMillis()>s.pinExpires)s.rotatePin();
         connection.setText(s.tokens.isEmpty()?"Подключить к компьютеру  ·  PIN "+s.pin+"\n"+getSharedPreferences("deck",0).getString("name",Build.MODEL):"Подключено компьютеров: "+s.tokens.size()+"  ·  Настройки подключения");
         state.setText((e.captureMode.equals("video")?"MOVIE":"PHOTO")+"  /  "+(e.recording?"● REC":e.powerState.equals("standby")?"STBY":"LIVE")+"  /  "+s.tokens.size()+" LINK");state.setTextColor(e.recording?0xffff5a52:YELLOW);

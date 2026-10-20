@@ -46,6 +46,42 @@ def test_pairing_requires_full_fingerprint_confirmation_and_numeric_pin(tmp_path
     window.close()
 
 
+def test_fullscreen_is_per_camera_and_frame_queue_keeps_only_latest(tmp_path,monkeypatch):
+    import updates,threading
+    from PyQt6.QtGui import QImage,QColor
+    monkeypatch.setattr(updates,"DATA",tmp_path)
+    monkeypatch.setattr(threading.Thread,"start",lambda self:None)
+    app=QApplication.instance() or QApplication([])
+    window=Window(auto_checks=False)
+    class Client:host="192.168.1.2"
+    tile=CameraTile(window,Client(),"Camera");tile.status={"recording":False,"ready":True}
+    window.tiles.append(tile);window.show();window.rebuild();app.processEvents()
+    assert not window.isFullScreen()
+    for i in range(50):
+        image=QImage(16,16,QImage.Format.Format_RGB32);image.fill(QColor(i,0,0))
+        with tile.frame_lock:tile.pending_frame=(image,0)
+    tile.display_latest()
+    assert tile.video.frame.pixelColor(0,0).red()==49 and tile.pending_frame is None
+    tile.open_fullscreen();app.processEvents()
+    assert tile.fullscreen.isFullScreen() and not window.isFullScreen()
+    tile.fullscreen.reject();app.processEvents();assert tile.fullscreen is None
+    window.close()
+
+
+def test_discovery_cards_connect_to_the_selected_phone(tmp_path,monkeypatch):
+    import updates
+    from PyQt6.QtWidgets import QPushButton
+    monkeypatch.setattr(updates,"DATA",tmp_path)
+    app=QApplication.instance() or QApplication([])
+    window=Window(auto_checks=False);seen=[]
+    window.devices=[{"name":"Phone A","host":"192.168.1.2","fingerprint":"a"*64},{"name":"Phone B","host":"192.168.1.3","fingerprint":"b"*64}]
+    window.begin_connect=lambda *args:seen.append(args)
+    window.refresh_devices();buttons=window.device_cards.findChildren(QPushButton)
+    buttons[-1].click()
+    assert seen==[("192.168.1.3","Phone B","b"*64)]
+    window.close()
+
+
 def test_capture_settings_keep_fps_and_raw_sizes_in_supported_mode(tmp_path,monkeypatch):
     import updates,threading
     from PyQt6.QtWidgets import QComboBox,QDialog

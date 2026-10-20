@@ -204,7 +204,7 @@ class CameraTile(QWidget):
         self.record.setText("■ Стоп" if recording else "● Запись")
         self.record.setStyleSheet("background:#a62520;color:#ffffff;border-color:#ed554b" if recording else "")
         self.record.setEnabled(status.get("ready", False) and mode=="video")
-        self.photo.setEnabled(status.get("ready", False) and not recording and mode=="photo")
+        self.photo.setEnabled(status.get("ready", False) and not recording and not status.get("photoPending",False) and mode=="photo")
         self.listen.setEnabled(status.get("audioAvailable",False))
         self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  VIEW ≈640px")
         free=status.get("storageFreeBytes",-1)

@@ -44,8 +44,9 @@ final class CameraEngine implements AutoCloseable {
     }
     void attachLocal(android.graphics.SurfaceTexture texture){handler.post(()->{
         if(closed||localOutput!=null&&localOutput.texture==texture)return;
-        if(localOutput!=null)retiredOutputs.add(localOutput);
+        if(localOutput!=null){LocalOutput old=localOutput;retiredOutputs.add(old);if(recording&&request!=null&&session!=null)try{request.removeTarget(old.surface);request.addTarget(preview.getSurface());repeat();}catch(Exception e){fail(e);}}
         localOutput=new LocalOutput(texture);localRejected=false;
+        if(recording)nativePreview=false;
         if(preview!=null)texture.setDefaultBufferSize(preview.getWidth(),preview.getHeight());
         if(ready&&!recording&&!photoPending)try{configure(false);}catch(Exception e){fail(e);}
     });}
@@ -89,7 +90,8 @@ final class CameraEngine implements AutoCloseable {
     CameraDevice camera;
     CameraCaptureSession session;
     CameraCharacteristics characteristics;
-    ImageReader preview, photos;
+    volatile ImageReader preview;
+    ImageReader photos;
     AvRecorder recorder;
     CaptureRequest.Builder request;
     long lastPreview;
@@ -137,7 +139,7 @@ final class CameraEngine implements AutoCloseable {
         } else {
             request.removeTarget(preview.getSurface());
             // Local hardware preview does not need CPU JPEG conversion.
-            if (power.remotePreview(SystemClock.elapsedRealtime()) || !nativePreview || !power.localPreview(SystemClock.elapsedRealtime())) request.addTarget(preview.getSurface());
+            if ((plan==PowerPolicy.Plan.PREVIEW||plan==PowerPolicy.Plan.RECORD_PREVIEW)&&(power.remotePreview(SystemClock.elapsedRealtime()) || !nativePreview || !power.localPreview(SystemClock.elapsedRealtime()))) request.addTarget(preview.getSurface());
             if(nativePreview&&localOutput!=null){request.removeTarget(localOutput.surface);if(power.localPreview(SystemClock.elapsedRealtime()))request.addTarget(localOutput.surface);}
             // The recorder surface remains targeted when only preview is paused.
             Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
@@ -192,6 +194,7 @@ final class CameraEngine implements AutoCloseable {
         if(localOutput!=null)localOutput.texture.setDefaultBufferSize(p.getWidth(),p.getHeight());
         preview = ImageReader.newInstance(p.getWidth(), p.getHeight(), ImageFormat.YUV_420_888, 2);
         preview.setOnImageAvailableListener(reader -> {
+            if(closed||reader!=preview)return;
             try (Image img = reader.acquireLatestImage()) {
                 if (img == null || (!power.remotePreview(SystemClock.elapsedRealtime())&&nativePreview) || !power.preview(SystemClock.elapsedRealtime()) || System.nanoTime() - lastPreview < 1_000_000_000L/power.fps()) return;
                 lastPreview = System.nanoTime();
@@ -201,7 +204,7 @@ final class CameraEngine implements AutoCloseable {
                     .compressToJpeg(new Rect(0, 0, img.getWidth(), img.getHeight()), power.quality(), out);
                 frame = out.toByteArray(); frameTime = System.currentTimeMillis(); frameSequence++;
                 synchronized(frameReady){frameReady.notifyAll();}
-            } catch (Exception e) { fail(e); }
+            } catch (Exception e) { if(!closed&&reader==preview)fail(e); }
         }, encoderHandler);
         createPhotoReader();
         manager.openCamera(id, new CameraDevice.StateCallback() {
@@ -212,7 +215,7 @@ final class CameraEngine implements AutoCloseable {
     }
 
     void createPhotoReader() {
-        photos=ImageReader.newInstance(photoWidth,photoHeight,photoFormat.equals("dng")?ImageFormat.RAW_SENSOR:ImageFormat.JPEG,2);
+        photos=ImageReader.newInstance(photoWidth,photoHeight,photoFormat.equals("dng")?ImageFormat.RAW_SENSOR:ImageFormat.JPEG,1);
         photos.setOnImageAvailableListener(reader -> {
             Image img=null;
             try {
@@ -236,6 +239,7 @@ final class CameraEngine implements AutoCloseable {
         photoWriter.execute(()-> {
             try(Image image=img) { PhotoWriter.write(image,result,c,f,format,orientation);store.photo(f);lastFile=f.getName(); }
             catch(Exception e) { fail(e); }
+            catch(OutOfMemoryError e){error="Недостаточно памяти для максимального фото. Выберите JPEG или меньшее разрешение.";}
             finally { handler.post(()-> { if(photoRequestId==requestId){photoPending=false;photoSaving=false;} }); }
         });
     }
@@ -400,7 +404,7 @@ final class CameraEngine implements AutoCloseable {
     }
 
     JSONObject status() throws Exception {
-        JSONObject o = new JSONObject().put("ready", ready).put("recording", recording).put("error", error)
+        JSONObject o = new JSONObject().put("ready", ready).put("recording", recording).put("photoPending",photoPending).put("error", error)
             .put("cameraId", cameraId).put("rotation", rotation).put("frameTime", frameTime).put("frameSequence", frameSequence)
             .put("iso", measuredIso).put("exposureNs", measuredExposure).put("manualIso", iso).put("manualExposureNs", exposure).put("focus", focus)
             .put("lastFile", lastFile).put("audio", sound).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "JPEG 640px / up to 10fps");
@@ -464,7 +468,7 @@ final class CameraEngine implements AutoCloseable {
             if (recording) {
                 try { recorder.stop(); recorder.close(); if(recorder.error.isEmpty()&&recordingTarget!=null)recordingTarget.finish(); } catch (Exception ignored) {}
             }
-            recording = false; releaseRecorder(); closeCamera(); return null;
+            recording = false; releaseRecorder(); closeCamera();if(localOutput!=null){localOutput.surface.release();localOutput=null;}for(LocalOutput old:retiredOutputs)old.release();retiredOutputs.clear();return null;
         });
         handler.post(task); try { task.get(5, TimeUnit.SECONDS); } catch (Exception ignored) {}
         thread.quitSafely();encoderThread.quitSafely();
