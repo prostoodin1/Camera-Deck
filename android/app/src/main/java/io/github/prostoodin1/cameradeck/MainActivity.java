@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
         nativeView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener(){
             public void onSurfaceTextureAvailable(SurfaceTexture t,int w,int h){attachPreview();}
             public void onSurfaceTextureSizeChanged(SurfaceTexture t,int w,int h){transformPreview();}
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture t){if(attachedEngine!=null&&attachedTexture==t){attachedEngine.detachLocal(t);attachedEngine=null;attachedTexture=null;return false;}return true;}
+            public boolean onSurfaceTextureDestroyed(SurfaceTexture t){if(attachedEngine!=null&&attachedTexture==t&&!attachedEngine.closed){attachedEngine.detachLocal(t);attachedEngine=null;attachedTexture=null;return false;}return true;}
             public void onSurfaceTextureUpdated(SurfaceTexture t){}
         });
         preview=new ImageView(this);preview.setBackgroundColor(BLACK);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);finder.addView(preview,new FrameLayout.LayoutParams(-1,-1));
@@ -241,7 +241,7 @@ public class MainActivity extends Activity {
         mode.setText(e.captureMode.equals("video")?"Видео":"Фото");shutter.setText(e.captureMode.equals("photo")?"◎":e.recording?"■":"●");buttonStyle(mode,false);buttonStyle(shutter,!e.recording);
         if(e.recording){shutter.setBackground(panel(0xffa62520,0xffed554b,2));shutter.setTextColor(WHITE);}
         center.setVisibility(showPreview&&(e.nativePreview||e.frame.length>0)?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
-        String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:"REC "+e.videoWidth+"×"+e.videoHeight+" "+e.videoFps+"p · "+(e.sound?"AAC":"MUTE")+"  /  VIEW "+e.power.fps()+"p");
+        String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:(e.captureMode.equals("video")?e.videoWidth+" × "+e.videoHeight+" · "+e.videoFps+" fps · "+(e.sound?"Со звуком":"Без звука"):e.photoFormat.toUpperCase(Locale.US)+" · "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)));
         if(SystemClock.elapsedRealtime()>nextStorageRefresh){nextStorageRefresh=SystemClock.elapsedRealtime()+3000;new Thread(()->{long free=e.store.freeBytes(),phone=e.mediaDir.getUsableSpace();String label=e.store.label();ui.post(()->storage.setText(label+" · "+(free>=0?android.text.format.Formatter.formatFileSize(this,free)+" свободно":"объём недоступен")+(e.store.tree()!=null?"  /  телефон: "+android.text.format.Formatter.formatFileSize(this,phone):"")));},"CameraDeck-storage-status").start();}
         if(qualitySheet!=null&&qualitySheet.isShowing()){videoControl.setText("Видео   "+e.videoWidth+" × "+e.videoHeight+"   ›");rateControl.setText("Частота   "+e.videoFps+" fps   ›");photoControl.setText("Фото   "+e.photoFormat.toUpperCase(Locale.US)+"   ›");photoSizeControl.setText("Размер фото   "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)+"   ›");}
         if(pairing!=null&&pairing.isShowing()){code.setText("PIN  "+s.pin);fingerprint.setText("Wi-Fi: "+localAddresses()+"\n\nSHA-256\n"+s.fingerprint.replaceAll("(.{8})","$1 "));}
