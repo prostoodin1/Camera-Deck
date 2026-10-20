@@ -19,7 +19,8 @@ final class PhotoWriter {
                 ByteBuffer buffer=image.getPlanes()[0].getBuffer(); byte[] bytes=new byte[buffer.remaining()]; buffer.get(bytes);
                 if(format.equals("jpg")) out.write(bytes);
                 else {
-                    Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);
+                    Bitmap bitmap;
+                    try{bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);}catch(OutOfMemoryError e){throw new IOException("Недостаточно памяти для преобразования максимального фото. Выберите JPEG или RAW.",e);}
                     if(bitmap==null) throw new IOException("JPEG decode failed");
                     ExifInterface exif=new ExifInterface(new ByteArrayInputStream(bytes));
                     int orientation=exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,1);

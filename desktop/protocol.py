@@ -7,6 +7,7 @@ import json
 import socket
 import ssl
 import time
+import threading
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -69,6 +70,7 @@ class CameraClient:
         self.host = local_host(host)
         self.fingerprint = fingerprint.replace(" ", "").lower()
         self.token = ""
+        self.refresh_secret="";self.session_lock=threading.Lock()
 
     def connection(self, probe: bool = False) -> http.client.HTTPSConnection:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -76,28 +78,66 @@ class CameraClient:
         context.verify_mode = ssl.CERT_NONE  # explicit certificate pin below
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         conn = http.client.HTTPSConnection(self.host, 39812, timeout=8, context=context)
-        conn.connect()
-        actual = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
-        if not probe and (not self.fingerprint or actual != self.fingerprint):
+        try:
+            try:
+                conn.connect()
+            except OSError as error:
+                raise ConnectionError(connection_message(error)) from error
+            actual = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+            if not probe and (not self.fingerprint or actual != self.fingerprint):
+                raise ssl.SSLError("Сертификат телефона изменился. Сравните отпечаток на телефоне и подключитесь заново.")
+            if probe:
+                self.fingerprint = actual
+            return conn
+        except Exception:
             conn.close()
-            raise ssl.SSLError("Сертификат телефона изменился. Сравните отпечаток на телефоне и подключитесь заново.")
-        if probe:
-            self.fingerprint = actual
-        return conn
+            raise
+
 
     def probe(self) -> str:
         conn = self.connection(probe=True)
         conn.close()
         return self.fingerprint
 
+    def frames(self, stopped, enabled):
+        """One pinned TLS stream. Only one bounded JPEG is held by this reader."""
+        conn=self.connection()
+        try:
+            conn.sock.settimeout(4)
+            conn.request("GET","/stream",headers={"Authorization":"Bearer "+self.token})
+            response=conn.getresponse()
+            if response.status==404:raise StreamUnavailable("Телефону требуется обновление потокового просмотра")
+            if response.status!=200:raise ConnectionError(f"Просмотр: HTTP {response.status}")
+            if "multipart/x-mixed-replace" not in response.getheader("Content-Type",""):raise ValueError("Неверный формат видеопотока")
+            while not stopped.is_set() and enabled.is_set():
+                line=response.readline(128)
+                if not line:raise ConnectionError("Видеопоток завершён")
+                if line==b"\r\n":continue
+                if line.strip()!=b"--aurora":raise ValueError("Повреждена граница видеопотока")
+                headers={};total=0
+                while True:
+                    line=response.readline(4096);total+=len(line)
+                    if not line or total>16384:raise ValueError("Повреждены заголовки видеопотока")
+                    if line==b"\r\n":break
+                    key,value=line.decode("ascii").split(":",1);headers[key.lower()]=value.strip()
+                size=int(headers.get("content-length","0"))
+                if not 0<size<=2_000_000:raise ValueError("Недопустимый размер видеокадра")
+                frame=response.read(size)
+                if len(frame)!=size:raise ConnectionError("Видеокадр получен не полностью")
+                yield frame,int(headers.get("x-rotation","0"))%360
+        finally:conn.close()
+
     def request(self, path: str, method: str = "GET", body: bytes | None = None,
-                extra: dict | None = None, limit: int = MAX_JSON) -> bytes:
+                extra: dict | None = None, limit: int = MAX_JSON, _retried=False) -> bytes:
         conn = self.connection()
         try:
             headers = {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
             headers.update(extra or {})
             conn.request(method, path, body=body, headers=headers)
             response = conn.getresponse()
+            if response.status==401 and self.refresh_secret and path!='/resume' and not _retried:
+                previous=headers['Authorization'][7:];conn.close();self.renew(previous)
+                return self.request(path,method,body,extra,limit,True)
             result = response.read(limit + 1)
             if len(result) > limit:
                 raise ValueError("Ответ телефона слишком большой")
@@ -115,17 +155,27 @@ class CameraClient:
         return json.loads(self.request(path, "POST" if body is not None else "GET",
                                        json.dumps(body).encode() if body is not None else None))
 
-    def pair(self, pin: str) -> dict:
+    def pair(self, pin: str, remember: bool = False) -> dict:
         if len(pin) != 4 or not pin.isascii() or not pin.isdigit():
             raise ValueError("PIN состоит из четырёх цифр")
-        result = self.json("/pair", {"pin": pin})
+        result = self.json("/pair", {"pin": pin,"remember":remember,"clientName":socket.gethostname()[:60]})
         self.token = result["token"]
+        self.refresh_secret=result.get("rememberToken","")
         return result
 
-    def command(self, action: str, **kwargs) -> dict:
-        return self.json("/command", {"action": action, **kwargs})
+    def resume(self, secret):
+        result=self.json("/resume",{"rememberToken":secret});self.token=result["token"];self.refresh_secret=secret;return result
 
-    def download(self, filename: str, folder: Path) -> Path:
+    def renew(self, previous):
+        with self.session_lock:
+            if self.token==previous:self.resume(self.refresh_secret);self.force_avc=True
+
+    def command(self, action: str, **kwargs) -> dict:
+        result=self.json("/command", {"action": action, **kwargs})
+        if action in ('camera','stream_config'):self.force_avc=True
+        return result
+
+    def download(self, filename: str, folder: Path, progress=None) -> Path:
         import re
         if not re.fullmatch(r"CD_\d+_[a-f0-9]{8}\.(jpg|png|webp|dng|mp4)", filename):
             raise ValueError("Недопустимое имя файла")
@@ -147,6 +197,8 @@ class CameraClient:
                 while chunk := response.read(256 * 1024):
                     out.write(chunk)
                     count += len(chunk)
+                    if count>expected:raise ValueError("Файл превышает заявленный размер")
+                    if progress:progress(count,expected)
             if count != expected:
                 raise ValueError("Файл скачан не полностью")
             partial.rename(target)
@@ -171,3 +223,23 @@ class CameraClient:
                     raise ConnectionError(json.loads(data).get("error", f"HTTP {response.status}"))
         finally:
             conn.close()
+
+
+class StreamUnavailable(ConnectionError):
+    pass
+
+
+def connection_message(error: Exception) -> str:
+    """Actionable connection failures without weakening TLS or certificate pinning."""
+    if isinstance(error, ssl.SSLError):
+        if "Сертификат телефона" in str(error):
+            return str(error)
+        return ("Телефон прервал защищённое подключение. Обновите Camera Deck на телефоне и компьютере, "
+                "затем выключите и включите камеру на телефоне и повторите подключение.\n\n"
+                "Если ошибка повторится, проверьте VPN и фильтрацию сети.\n"
+                f"Подробности: {error}")
+    if isinstance(error, (TimeoutError, OSError)):
+        return ("Не удалось связаться с телефоном. Включите камеру в приложении, проверьте общую Wi-Fi сеть "
+                "и IP-адрес. При необходимости разрешите Camera Deck в брандмауэре для частной сети.\n\n"
+                f"Подробности: {error}")
+    return str(error)

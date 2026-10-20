@@ -8,9 +8,11 @@ final class PowerPolicy {
     void remote(long now) { remoteUntil = now + 4000; }
     void local(long now) { localUntil = now + 1500; }
     void hideLocal() { localUntil = 0; }
+    boolean localPreview(long now){return now<localUntil;}
+    boolean remotePreview(long now){return now<remoteUntil;}
     void operation(long now) { operationUntil = now + 3000; }
     boolean preview(long now) { return now < Math.max(remoteUntil, Math.max(localUntil, operationUntil)); }
-    int fps() { return eco ? 5 : 10; }
+    int fps() { return eco ? 12 : 24; }
     int quality() { return eco ? 60 : 72; }
     Plan plan(long now, boolean recording) {
         boolean view = preview(now);

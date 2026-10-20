@@ -1,101 +1,62 @@
-# Camera Deck
+# Camera Deck · Slate
 
-Android cameras controlled from a Windows desk. Public source, signed APK/EXE releases and anonymous updates: [prostoodin1/Camera-Deck](https://github.com/prostoodin1/Camera-Deck).
+Android cameras controlled from a Windows operator desk. **Slate 0.9.0 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical phone, Wi-Fi and USB validation remains necessary.
 
-Version **0.4.0 is an experimental prerelease**, initially intended for Pixel 8 Pro and Galaxy S22 Ultra. Neither phone has been connected to the development machine during validation. An APK build or passing desktop tests does not demonstrate real camera compatibility, latency or long-session reliability.
+## Start
 
-Both native apps now use an original black/yellow camera-console interface: large viewfinders, compact exposure readouts and clearly separated recording controls. On Android, connection, capture and power controls open in dedicated panels. This is not a Sony product and uses no Sony branding or assets.
+Install `CameraDeck-Slate-Android.apk` over the existing Aurora/Prism/Orbit/Glide app; do not uninstall first. Run `CameraDeck-Slate-Windows.exe`, or extract the complete `CameraDeck-Slate-Windows-Portable.zip` and launch `CameraDeck-Portable.exe` with `_internal` beside it. Portable avoids Python extraction into `_MEI`; no Python installation is required.
 
-## Screenshots: functional test stand
+Enable the camera on the phone, grant permissions and use a reachable local network. Find the phone on Windows or enter its IPv4 address. Compare the entire SHA-256 fingerprint before pairing with the PIN. Trust the computer for later reconnection; revoke trust when removing access. Android package `.aurora`, APK signing identity and signed-update product `camera-deck-aurora` remain unchanged.
 
-Actual desktop screenshots connected through pinned TLS to two local **camera simulators**. They demonstrate JPEG transfer, photo download and simulated recording controls, not Android capture, real MP4 recording, audio or battery performance. Both feeds and the window are visibly labelled as a test stand.
+## Workspaces
 
-![Two simulated sources with video controls](docs/screenshots/02-video-control-simulator.png)
+- **Монитор**: compact camera cards, measured display FPS, per-camera capture, fullscreen and persistent viewer rotation/lock. Layouts in 1–3 columns and groups; hidden views pause preview, preserving phone recording.
+- **Камера**: selected-camera inspector, actual exposure values, photo/video settings, focus, zoom/composition, audio and original PC recording. Geometry, selected identity and groups persist.
+- **Продакшн**: group start/stop with per-camera preflight and confirmed results, elapsed state/storage and operation timeline. Failures remain independent; start is never blindly retried. Clock estimation reports round-trip uncertainty and does not synchronize exposures or promise frame alignment.
+- **Материалы**: authenticated metadata/thumbnails, search/filtering, paging on updated phones, original download with progress/retry, downloaded-video playback and photo opening. Partial phone files are labeled separately, not offered as completed downloads. Interrupted PC fragments can be remuxed to a new file without replacing the source.
 
-![Capture settings](docs/screenshots/03-capture-settings.png)
+Preview tools: grid, 90% safe area, histogram, waveform, zebra at luma >=235/255 and approximate false color. Bounded 160×90 analysis runs outside the GUI at 4 Hz. These describe decoded **8-bit preview**, not RAW, calibrated IRE or HDR, and never alter the original.
 
-![Exposure and focus](docs/screenshots/04-exposure-settings.png)
+Android has a black/graphite visual system, limited yellow accents, drawn round shutter, recording timer and clean view, portrait/landscape layouts, pinch zoom/touch AF, grid/safe area and reported thermal restrictions. A microphone toggle, mic activity and confirmed recording audio track are separate states.
 
-Reproduce with `python scripts/capture_demo.py`. The development simulator listens only on loopback and is not part of the installed app.
+## Preview and original recording
 
-## First connection
+Idle phone preview uses Camera2/TextureView. Compatible local preview converts latest NV21 on a dedicated worker without JPEG round trips/UI decoding. It retains one latest input/one UI handoff. Local conversion is bounded to 640×480 by integer sampling; original/Windows AVC resolution is unaffected. Fractional cadence prevents a 30 FPS source collapsing to 15 FPS at a 24 FPS target.
 
-1. Install `CameraDeck-Android-0.4.0.apk` on each phone. Open it, press **ВКЛ** and grant camera and microphone access. Open **ПОДКЛ.** for the name, PIN, IP and fingerprint. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission. Local **VIEW** starts disabled; enable it if you need an on-phone preview.
-2. Run `CameraDeck-Windows-0.4.0.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
-3. Press **Найти телефоны**, select a device and **Подключить**. If discovery fails, enter the IPv4 address displayed by the phone using **По IP**. Guest Wi-Fi/client isolation and Windows Firewall can block discovery; use a Private network and allow Camera Deck only on that network. Do not expose the ports to the Internet.
-4. Compare the **entire SHA-256 TLS fingerprint** shown by both apps, confirm the match and enter the phone's four-digit PIN. The comparison is required for first pairing, including manual IP connections.
-5. Repeat for the second phone. Give each tile a group name and use the group selector / column selector to arrange the desk.
+Windows prefers H.264 over pinned TLS: Balanced targets up to 720p60, Detail up to 1080p60, Eco targets 30 AVC FPS. Actual camera/codec support governs selection. B-frames are disabled where supported; IDRs include parameter sets; history is bounded to 16 access units/4 MB. Slow viewers restart on an IDR and bitrate adapts up to 6/12 Mbps. A 16 ms GUI timer is not advertised as camera FPS. JPEG fallback targets 24 FPS/12 Eco.
 
-## Implemented in this preview
+Recording waits for the previous session to close and releases the separate preview encoder. It uses the original encoder plus compatible YUV, excluding native/still/second-encoder outputs. Recorder-only fallback can preserve selected resolution/FPS at the cost of preview/face analysis. Auto zoom/face focus continue in background recording when the YUV output remains available. Faces/eyes use bundled on-device ML Kit; markers do not prove vendor eye-AF or eye sharpness. MP4 orientation is fixed at start; viewer rotation is separate.
 
-- Camera2 capture with runtime camera capability/range reporting. Only camera IDs exposed by Android are selectable; access to every physical lens or vendor camera feature is not promised.
-- JPEG preview around 640 pixels wide, **up to 5fps in the default Eco mode**, or up to 10fps with Eco disabled on the phone, using latest-frame delivery. This is the initial diagnostic transport, not a finished low-latency H.264/WebRTC stream. Measured latency is not yet available.
-- Explicit **Фото / Видео** selector per camera. Stop recording before switching mode, resolution, FPS or photo format.
-- Recording sizes up to 3840×2160 and normal-session target rates up to 60fps, filtered by Camera2 size/minimum-frame-duration, AE ranges and H.264 encoder support. FPS options depend on the selected size. High-speed/120fps sessions are not implemented. Automatic exposure may vary below a selected range ceiling; actual output and simultaneous-stream combinations require phone validation.
-- MP4 uses surface H.264 plus optional AAC-LC audio at 48kHz mono / 128kbps, enabled by default. Video bitrate scales between 2 and 60Mbps. Incomplete recordings retain `.partial` and are not listed as finished originals. Rotation is fixed during recording.
-- JPEG, PNG, WebP and capability-gated RAW DNG, with selectable sizes up to 24 megapixels to limit memory use. PNG/WebP are converted from the processed JPEG: PNG does not restore lost JPEG information; WebP uses quality 95. DNG uses an actual RAW_SENSOR image and matching capture metadata. A failed RAW+preview combination reports an error and restores JPEG.
-- ISO + shutter applied together in manual mode, or automatic exposure; focus in dioptres or continuous autofocus. Controls report actual sensor exposure values. Unavailable capabilities are disabled or rejected by the phone.
-- Photos are unavailable while recording. Stop video before changing the camera or installing an update. Recording remains on the phone if the Windows desk disconnects; use the phone notification's Stop action to stop the service if needed.
-- **Материалы** lists up to 100 latest completed files and downloads selected originals to a chosen Windows folder. Recordings live in the app-specific external captures directory. **Uninstalling the Android app removes its recordings**; download originals first. Interrupted desktop transfers are not presented as complete files.
+Choose Video, a supported recording mode, then **Камера → Запись оригинала на ПК**. Original encoded video/AAC packets and timestamps travel over TLS; Windows remuxes without re-encoding. Fragmented MP4 with delayed initialization preserves initial A/V offsets. Completion requires explicit terminal confirmation and muxer closure.
 
-## Public signed updates
+**Phone backup is mandatory in Slate and still consumes phone/selected-phone-storage space. PC-only recording is not implemented.** Network/PC disk failures do not automatically stop the backup. Windows retains `.partial.mp4` plus a `.recording.json` journal. Recovery depends on readable completed fragments; it is not guaranteed before initialization or after arbitrary disk damage. Closing during capture warns that the PC copy will be interrupted.
 
-Windows anonymously checks `prostoodin1/Camera-Deck` releases on launch and hourly when automatic checks are enabled. Only `camera-deck-v*` releases with a valid `camera-deck-update.json` signature are accepted, including prereleases. The highest signed version code wins; this does not depend on GitHub's `latest` release.
+The relay is bounded to 64 MB/8 MB per message and never waits on a slow network from the phone encoder. Windows checks disk capacity before/during recording. Android 10+ is required for disabling B-frames on the original relay; reordered encoder output explicitly terminates the PC copy. Android 9 keeps local phone recording.
 
-No GitHub account, Git installation or token is required for installed apps to check/download updates. Update keys and APK identity remain continuous with earlier builds. Publishing releases is a separate maintainer action requiring GitHub authentication.
+## Capabilities, sound and storage
 
-Versions through 0.3.0 checked the previous development repository. Download/install 0.3.1 or newer from this public repository once to switch channels; subsequent updates use this public repository automatically. Install the APK over the existing app rather than uninstalling it, to keep recordings.
+Normal video modes come from Camera2 sizes/minimum durations/AE ranges and AVC/HEVC encoder support. Common reported HD/Full HD/QHD/4K/8K choices appear first; other reported sizes remain selectable. 4K60 requires actual device exposure and usability. High-speed/maximum-sensor modes are informational; special sessions, vendor HDR/Log/10-bit and stock-camera computational algorithms are not implemented.
 
-- Windows downloads a newer EXE automatically, verifies its signed metadata, size and SHA-256, and offers **Обновить Windows**. Confirming an idle restart replaces the EXE and keeps `<exe>.previous` for recovery. Current recordings or unknown camera states block installation. The initial EXE has no Windows Authenticode publisher certificate and may trigger SmartScreen.
-- For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone open **ПИТАНИЕ → УСТАНОВИТЬ ОБНОВЛЕНИЕ**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
-- Ordinary APK updates keep data; **never uninstall to update**. A complete real-device update from version N to N+1 has not yet been exercised.
+JPEG comes from the camera; PNG/WebP convert processed JPEG and cannot restore lost information. DNG uses actual RAW_SENSOR and matching metadata if supported. ISO/exposure/manual focus are capability gated. Modes/lenses/storage cannot change during recording; photos during video recording are unavailable.
 
-No shared GitHub credential is embedded in either app. Android updates are fetched by Windows from public releases and passed to the phone. Camera control itself does not need Internet access.
+MP4 uses AVC/HEVC and optional AAC-LC 48 kHz mono/128 kbps. Independent live monitoring uses PCM 48 kHz mono/16 bit and is **not** lip-synchronized with preview. Phone storage or a persistent SAF folder (including available USB providers) can be selected. MP4 requires a seekable descriptor. Photos stage then export; failed operations retain partial/original files. Free capacity can be unknown; remaining minutes are not invented.
 
-## Sound and capture controls
+## Protocol and protection
 
-Select **Видео**, open **Настройки**, choose recording size/FPS and leave **Записывать звук в MP4 (AAC)** enabled. Missing microphone permission produces an error rather than a silent recording. Explicitly disable this checkbox for silent video. Select **Фото** to enable its shutter button and choose photo format/size in the same settings dialog. RAW dimensions may differ from processed-photo dimensions.
+Discovery: UDP 39811, `CAMERA_DECK_DISCOVER_V1`, JSON replies. API/media: HTTP over TCP/TLS 1.2 on 39812. Full certificate pin precedes PIN/token transmission, followed by Bearer authorization. PIN expires in five minutes, rotates after pairing, max five attempts/minute. Sessions last up to eight hours/max four. Max eight trusted clients, two preview consumers/two microphone listeners. Windows secrets use account-bound DPAPI; the phone retains hashes. No cloud account is needed for capture; public GitHub is used for updates.
 
-Check **Слушать микрофон телефона** to hear live sound on Windows; this controls listening separately from the recording sound track. One AudioRecord feeds both AAC recording and live monitoring. Monitoring is opt-in, uses pinned/authenticated TLS and raw 48kHz mono signed 16-bit little-endian PCM, and has bounded queues that discard stale backlog. At most two listeners are allowed per phone. Session expiry/revocation ends monitoring. Headphones avoid speaker-to-phone feedback. A missing/unsupported Windows output device is reported; this version needs 48kHz mono Int16 output support.
+Existing API endpoints/protocol1 remain compatible. Additions: `/recording`, `/clock`, `/media_info`, `/thumbnail`, opt-in paged/partial media and extra status fields. Legacy `/media` keeps the completed-file list. Old phones retain textual catalog fallback; original PC recording requires the advertised capability. No WebRTC, RTSP/RTP, SRT, NDI, QUIC, USB video transport or internet relay; zero latency/loss is not promised.
 
-Hiding/minimizing/pausing a camera's preview stops live monitoring but does not stop an active MP4 sound track. With no listener or recording, the microphone stops. The notification indicates microphone activity.
+The original relay frames each message as uint32 big-endian length (including kind), then kind 0 hello/1 JSON formats/2 sample/3 JSON terminal. A sample contains track byte (video0/AAC1), int64 PTS microseconds, uint32 codec flags and encoded bytes. Configuration contains MIME, size/rate and base64 codec-specific bytes.
 
-**Resolution/FPS selectors control the original recording.** Live images remain about 640px at 5fps Eco / 10fps normal. Live PCM and JPEG use separate paths and are not lip-synchronized. MP4 uses a common elapsed-realtime origin and hardware audio timestamps when available; an unknown Camera2 timebase uses first-frame calibration. No measured synchronization accuracy is claimed.
+Foreground service/notification and demand-based timed wake lock support recording/transfers. Idle views stop repeating requests. No boot startup or automatic battery exemption. Thermal/background behavior is firmware-dependent.
 
-## Background operation and battery
+## Updates, builds, validation
 
-Start the camera while the Android application is visible, then press **Продолжить в фоне**, switch applications or turn off the screen. The existing camera foreground service continues with a visible notification and Stop action. This does not start the camera after a reboot or force-stop, and Android may terminate it under system pressure.
+Both programs verify signed GitHub manifests (RSA/SHA-256), product/version and artifact hashes/sizes. APK package/certificate are checked; Android installation requires system approval. EXE/Portable updates retain previous copies and avoid active/uncertain recording. A non-starting old EXE needs one manual portable recovery.
 
-Eco is enabled by default and saved between launches. It reduces JPEG encoding quality from 72 to 60 and caps preview encoding and Windows frame requests at 5fps, without changing recording targets. The sensor FPS range comes from the device; a 5fps sensor mode is not assumed. Recording keeps the selected target FPS. Microphone capture, PCM transmission and AAC encoding also consume battery when enabled.
+Desktop: Python3.13, `pip install -r desktop/requirements.txt pytest pyinstaller`, `python scripts/collect_licenses.py`, `python scripts/build_windows.py`. Test: `python -m pytest tests -q`. Both executables accept `--self-test ABSOLUTE_OUTPUT_DIRECTORY`.
 
-Local preview on the phone is optional and off by default. The screen is never kept awake automatically. Minimizing the Windows desk, hiding a camera by group or unchecking **Предпросмотр** stops its frame requests; status checks slow to once every three seconds. Other visible desks may still request preview. Stopping preview never stops an active recording.
+Android: JDK17, Gradle8.7, SDK35/build-tools35. In `android`: `gradle --no-daemon -PcameraDeckPreview=true :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`. Re-sign published APKs with `scripts/sign_preview.py` and the existing persistent Aurora key; CI signing is not release signing. Stage EXE/APK/Portable ZIP and run `scripts/aurora_manifest.py`. Never replace existing APK/update keys.
 
-Within four seconds of the last remote frame request (plus up to one second for the policy timer), when there is no local preview, pending operation or recording, the app stops Camera2 repeating requests and JPEG work. It retains the open camera/session for resumption inside the already-started foreground service; it does not claim to fully power down every manufacturer's camera hardware. A new preview request or capture command resumes work. During recording with no viewer the repeating request targets only the hardware recorder surface; it does not produce preview images.
-
-The CPU wake lock has a 90-second safety timeout and is renewed only for preview, recording, microphone listeners, camera transitions or file/update transfer. It is released in standby when sound is unused. There is no automatic battery-optimization exemption, permanent polling wakeup or Wi-Fi lock. Deep Doze / manufacturer power saving may delay networking; instant wake and negligible drain are not promised. See [foreground service rules](https://developer.android.com/develop/background-work/services/fgs/service-types) and [Doze networking restrictions](https://developer.android.com/training/monitoring-device-state/doze-standby).
-
-Battery drain, thermal behaviour and uninterrupted screen-off recording still require measurements on both real phones. Compare Eco and normal mode under the same Wi-Fi, scene, brightness and recording workload before quoting a percentage-per-hour saving.
-
-## Protocol and security
-
-UDP `39811` handles discovery; TLS `39812` carries commands, frames and original files. Each Android installation creates its own EC certificate/private key in AndroidKeyStore. The Windows client checks the exact certificate fingerprint **before sending credentials**. Discovery is untrusted and never grants access by itself.
-
-The displayed PIN expires after five minutes and rotates after pairing. Pairing attempts are globally limited to five per minute. Random 256-bit session tokens expire after eight hours and remain in memory. **Отключить все компьютеры** revokes them. A new pairing is required after either app restarts. Revocation blocks new requests; an already-started file transfer may finish.
-
-This version is for a trusted local network. It has no Internet relay, remote screen control, frame-accurate camera synchronisation, HDR/Log, 4K guarantee or automatic recovery of a disconnected camera device.
-
-## Build and validation
-
-Desktop: Python 3.13 x64, `pip install -r desktop/requirements.txt`, plus `pytest` and `pyinstaller` for development/build. Run `python desktop/main.py`. Before packaging run `python scripts/collect_licenses.py`, then inside `desktop/` run `python -m PyInstaller --noconfirm --onefile --windowed --name CameraDeck --add-data "update-public.pem;." --add-data "../third_party_licenses;third_party_licenses" --add-data "../THIRD_PARTY_NOTICES.md;." main.py`.
-
-Android: JDK 17, Gradle 8.7, Android SDK platform 35 and build-tools 35.0.0. Set `JAVA_HOME`, `ANDROID_HOME` and `CAMERA_DECK_GRADLE` (absolute path to `gradle.bat`). From this folder run `python scripts/signing.py`, then `python scripts/build_android.py`. The build also runs Android Lint.
-
-`scripts/signing.py` creates the persistent APK keystore and a separate RSA update signing key under `%LOCALAPPDATA%/CameraDeck/signing`, restricting its ACL to the current Windows user and SYSTEM. Its password is protected with DPAPI. Public keys are generated into both apps. **Keep these private identities for all future releases; losing/replacing them breaks update continuity.** They are not committed or uploaded. Back up the signing identity securely; DPAPI ciphertext alone is not portable to another Windows account.
-
-`python -m pytest tests -q` checks update signatures, tampering, rollback rejection, unsafe metadata, TLS pin-before-credentials, redirect credentials, DPAPI, bounded PCM queues, unknown audio rejection, capture controls, preview suspension and pure-Java power transitions (requires JDK). Android JVM tests validate mode/rate/format combinations with fixture capabilities. None exercises actual microphones, speakers, codecs, RAW hardware or a real phone. After building, `python scripts/package_release.py` creates APK, EXE, signed update envelope and checksums under `release/<version>/`; the source ZIP comes from the tracked Git tree.
-
-Before calling this ready for daily shooting, verify each phone's lenses/manual controls, orientation, photo output, MP4 playback, preview latency, two-camera bandwidth, Wi-Fi interruptions, foreground/background/screen-off operation, heating and an actual signed N→N+1 update. No such hardware results are claimed by this prerelease.
-
-## License
-
-GPL-3.0-only; see [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md). Windows uses the GPL distribution of PyQt6.
+See [Slate implementation and validation report](docs/SLATE-REPORT.ru.md) for completed/partial features and physical tests. License GPL-3.0-only; [third-party notices](THIRD_PARTY_NOTICES.md).

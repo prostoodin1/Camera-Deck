@@ -17,28 +17,36 @@ final class CaptureCapabilities {
         Range<Integer>[] ranges=c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
         Size[] videoSizes=map.getOutputSizes(MediaCodec.class);
         if(videoSizes!=null) for(Size size:videoSizes) {
-            if(size.getWidth()>3840 || size.getHeight()>2160)continue;
             JSONArray rates=new JSONArray();
-            for(int fps:new int[]{15,24,25,30,50,60}) {
-                boolean ae=false; if(ranges!=null)for(Range<Integer> range:ranges)if(range.getUpper()==fps)ae=true;
+            TreeSet<Integer> candidates=new TreeSet<>();
+            if(ranges!=null)for(Range<Integer> range:ranges){candidates.add(range.getLower());candidates.add(range.getUpper());}
+            for(int fps:candidates) {
+                boolean ae=false; if(ranges!=null)for(Range<Integer> range:ranges)if(range.contains(fps))ae=true;
                 long duration=map.getOutputMinFrameDuration(MediaCodec.class,size);
                 if(!ae || (duration>0 && duration>1_000_000_000L/fps+1000))continue;
-                if(codecs.findEncoderForFormat(AvRecorder.videoFormat(size.getWidth(),size.getHeight(),fps))!=null)rates.put(fps);
+                try{if(codecs.findEncoderForFormat(AvRecorder.videoFormat(size.getWidth(),size.getHeight(),fps))!=null)rates.put(fps);}catch(IllegalArgumentException ignored){}
             }
-            if(rates.length()>0)video.put(new JSONObject().put("width",size.getWidth()).put("height",size.getHeight()).put("fps",rates));
+            if(rates.length()>0)video.put(new JSONObject().put("width",size.getWidth()).put("height",size.getHeight()).put("fps",rates).put("codec",AvRecorder.videoFormat(size.getWidth(),size.getHeight(),rates.getInt(rates.length()-1)).getString(MediaFormat.KEY_MIME)));
         }
-        addSizes(processed,map.getOutputSizes(ImageFormat.JPEG));
+        addSizes(processed,map.getOutputSizes(ImageFormat.JPEG));addSizes(processed,map.getHighResolutionOutputSizes(ImageFormat.JPEG));
         int[] capabilities=c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
         boolean rawSensor=false;
         if(capabilities!=null)for(int cap:capabilities)if(cap==CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)rawSensor=true;
         if(rawSensor)addSizes(raw,map.getOutputSizes(ImageFormat.RAW_SENSOR));
         JSONArray formats=new JSONArray().put("jpg").put("png").put("webp");
         if(raw.length()>0)formats.put("dng");
-        return new JSONObject().put("videoModes",video).put("photoSizes",processed).put("rawSizes",raw).put("photoFormats",formats);
+        JSONArray highSpeed=new JSONArray();
+        if(capabilities!=null)for(int cap:capabilities)if(cap==CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO){
+            for(Size size:map.getHighSpeedVideoSizes()){JSONArray fps=new JSONArray();for(Range<Integer> r:map.getHighSpeedVideoFpsRangesFor(size))fps.put(new JSONObject().put("min",r.getLower()).put("max",r.getUpper()));highSpeed.put(new JSONObject().put("width",size.getWidth()).put("height",size.getHeight()).put("ranges",fps));}
+        }
+        JSONArray ae=new JSONArray();if(ranges!=null)for(Range<Integer> r:ranges)ae.put(new JSONObject().put("min",r.getLower()).put("max",r.getUpper()));
+        JSONArray sensorSizes=new JSONArray();
+        if(android.os.Build.VERSION.SDK_INT>=31){StreamConfigurationMap maximum=c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP_MAXIMUM_RESOLUTION);if(maximum!=null)addSizes(sensorSizes,maximum.getOutputSizes(ImageFormat.JPEG));}
+        return new JSONObject().put("videoModes",video).put("photoSizes",processed).put("rawSizes",raw).put("photoFormats",formats).put("aeRanges",ae).put("highSpeedModes",highSpeed).put("maximumSensorSizes",sensorSizes)
+            .put("specialModesNote","Высокоскоростные и maximum-sensor режимы показаны отдельно: для них нужен специальный сеанс камеры. В обычной съёмке доступны только проверенные сочетания камеры и кодека.");
     }
     static void addSizes(JSONArray out,Size[] sizes) throws Exception {
-        if(sizes!=null)for(Size s:sizes)if((long)s.getWidth()*s.getHeight()<=24_000_000)
-            out.put(new JSONObject().put("width",s.getWidth()).put("height",s.getHeight()));
+        if(sizes!=null)for(Size s:sizes){boolean found=false;for(int i=0;i<out.length();i++){JSONObject old=out.getJSONObject(i);if(old.getInt("width")==s.getWidth()&&old.getInt("height")==s.getHeight())found=true;}if(!found)out.put(new JSONObject().put("width",s.getWidth()).put("height",s.getHeight()));}
     }
     static boolean videoAllowed(JSONObject caps,int w,int h,int fps) throws Exception {
         JSONArray modes=caps.getJSONArray("videoModes");

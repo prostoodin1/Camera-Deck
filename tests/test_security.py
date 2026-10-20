@@ -22,7 +22,7 @@ def identity():
 
 
 def signed(identity, change=None):
-    data={"product":"camera-deck","version":"0.2.0","code":updates.VERSION_CODE+1,"protocol":1,
+    data={"product":updates.PRODUCT,"version":"0.2.0","code":updates.VERSION_CODE+1,"protocol":1,
           "windows":{"name":"CameraDeck.exe","size":3,"sha256":"a"*64},
           "android":{"name":"CameraDeck.apk","size":4,"sha256":"b"*64}}
     if change: change(data)
@@ -64,6 +64,19 @@ def test_certificate_pin_checked_before_request(monkeypatch):
     client=protocol.CameraClient("192.168.1.2","0"*64)
     with pytest.raises(ssl.SSLError): client.pair("1234")
     assert not Connection.sent
+
+
+def test_aborted_tls_closes_socket_and_explains_recovery(monkeypatch):
+    class Connection:
+        closed=False
+        def __init__(self,*args,**kwargs): pass
+        def connect(self): raise ssl.SSLEOFError("UNEXPECTED_EOF_WHILE_READING")
+        def close(self): Connection.closed=True
+        def request(self,*args,**kwargs): pytest.fail("Credentials sent after failed handshake")
+    monkeypatch.setattr(protocol.http.client,"HTTPSConnection",Connection)
+    with pytest.raises(ConnectionError,match="Обновите Camera Deck"):
+        protocol.CameraClient("192.168.1.2").pair("1234")
+    assert Connection.closed
 
 
 @pytest.mark.parametrize("host",["8.8.8.8","127.0.0.1","0.0.0.0","224.0.0.1","example.org","::1"])
