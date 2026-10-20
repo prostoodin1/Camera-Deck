@@ -78,7 +78,7 @@ Battery drain, thermal behaviour and uninterrupted screen-off recording still re
 
 ## Connection recovery
 
-Android now uses its platform KeyManagerFactory with the existing AndroidKeyStore identity instead of a custom EC-only alias selector. New keys authorize SHA-256/384/512 signatures. Existing keys and fingerprints are preserved. Windows closes failed handshake sockets and shows recovery steps for TLS EOF and unreachable devices. Certificate pinning remains mandatory before credentials are sent. These changes address TLS interoperability risks; the reported EOF still needs confirmation on the affected physical phone.
+The reported TLS EOF was reproduced on an Android 15 emulator: Conscrypt signs an already hashed TLS transcript using `NONEwithECDSA`, but the old keystore key did not authorize `DIGEST_NONE`. Android creates a new `camera-deck-tls-v2` key with that authorization and uses the platform KeyManagerFactory. The old key is retained; the TLS fingerprint changes once, so compare the new full fingerprint on both screens when pairing. APK/update signing identities are separate and unaffected. Windows closes failed handshake sockets and explains recovery steps. Certificate pinning remains mandatory before credentials are sent. Physical-phone verification remains required.
 
 ## Protocol and security
 

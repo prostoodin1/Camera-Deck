@@ -22,6 +22,30 @@ def test_window_renders_without_hardware(tmp_path,monkeypatch):
     window.close()
 
 
+def test_pairing_requires_full_fingerprint_confirmation_and_numeric_pin(tmp_path,monkeypatch):
+    import main, updates
+    from PyQt6.QtWidgets import QDialog,QCheckBox,QLineEdit,QDialogButtonBox
+    monkeypatch.setattr(updates,"DATA",tmp_path)
+    app=QApplication.instance() or QApplication([])
+    window=Window(auto_checks=False)
+    window.run=lambda fn,callback:callback(fn())
+    monkeypatch.setattr(main.CameraClient,"probe",lambda self:"a"*64)
+    def inspect(dialog):
+        checked=dialog.findChild(QCheckBox)
+        pin=dialog.findChild(QLineEdit)
+        ok=dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok)
+        pin.setText("1234");assert not ok.isEnabled()
+        checked.setChecked(True);assert ok.isEnabled()
+        pin.setText("abcd");assert not ok.isEnabled()
+        pin.setText("１２３４");assert not ok.isEnabled()
+        pin.setText("123");assert not ok.isEnabled()
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(QDialog,"exec",inspect)
+    window.begin_connect("192.168.1.2","Android phone","a"*64)
+    assert not window.tiles
+    window.close()
+
+
 def test_capture_settings_keep_fps_and_raw_sizes_in_supported_mode(tmp_path,monkeypatch):
     import updates,threading
     from PyQt6.QtWidgets import QComboBox,QDialog

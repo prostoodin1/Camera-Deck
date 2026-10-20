@@ -31,7 +31,8 @@ public class MainActivity extends Activity {
     long sequence=-1;
     OrientationEventListener orientation;
     AlertDialog pairing;
-    final Runnable refresh=new Runnable(){public void run(){update();ui.postDelayed(this,100);}};
+    final Runnable refresh=new Runnable(){public void run(){update();ui.postDelayed(this,500);}};
+    final Runnable frames=new Runnable(){public void run(){renderPreview();ui.postDelayed(this,100);}};
 
     int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     GradientDrawable panel(int fill,int stroke,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(radius));d.setStroke(dp(1),stroke);return d;}
@@ -191,7 +192,7 @@ public class MainActivity extends Activity {
         if(install!=null){install.setEnabled(new File(getFilesDir(),"update.apk").isFile()&&(!active||(!e.recording&&!e.photoPending)));buttonStyle(install,false);}
         mode.setEnabled(active&&e.ready&&!e.recording&&!e.photoPending&&!commandPending);shutter.setEnabled(active&&e.ready&&!e.photoPending&&!commandPending);
         if(!active){connection.setText("Включите камеру — изображение и PIN появятся здесь");state.setText("Камера выключена");telemetry.setText("ISO —     S —     AF");center.setText("Камера готова к работе\nНажмите «Включить» и разрешите доступ");center.setVisibility(View.VISIBLE);preview.setImageDrawable(null);sequence=-1;notice.setText(CameraService.lastStartupError.isEmpty()?"Оригиналы сохраняются на телефоне":CameraService.lastStartupError);if(code!=null)code.setText("Камера выключена");return;}
-        if(resumed&&showPreview)e.demandLocal();if(System.currentTimeMillis()>s.pinExpires)s.rotatePin();
+        if(System.currentTimeMillis()>s.pinExpires)s.rotatePin();
         connection.setText(s.tokens.isEmpty()?"Подключить к компьютеру  ·  PIN "+s.pin+"\n"+getSharedPreferences("deck",0).getString("name",Build.MODEL):"Подключено компьютеров: "+s.tokens.size()+"  ·  Настройки подключения");
         state.setText((e.captureMode.equals("video")?"MOVIE":"PHOTO")+"  /  "+(e.recording?"● REC":e.powerState.equals("standby")?"STBY":"LIVE")+"  /  "+s.tokens.size()+" LINK");state.setTextColor(e.recording?0xffff5a52:YELLOW);
         telemetry.setText("ISO "+(e.measuredIso>0?e.measuredIso:"—")+"    S "+shutterValue(e.measuredExposure)+"    "+(e.focus<0?"AF-C":"MF"));
@@ -201,6 +202,10 @@ public class MainActivity extends Activity {
         center.setVisibility(showPreview&&e.frame.length>0?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
         String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:"REC "+e.videoWidth+"×"+e.videoHeight+" "+e.videoFps+"p · "+(e.sound?"AAC":"MUTE")+"  /  VIEW "+e.power.fps()+"p");
         if(pairing!=null&&pairing.isShowing()){code.setText("PIN  "+s.pin);fingerprint.setText("Wi-Fi: "+localAddresses()+"\n\nSHA-256\n"+s.fingerprint.replaceAll("(.{8})","$1 "));}
+    }
+    void renderPreview(){
+        CameraEngine e=engine();if(e==null||!resumed||!showPreview)return;
+        e.demandLocal();
         if(showPreview&&e.frameSequence!=sequence){sequence=e.frameSequence;byte[] bytes=e.frame;Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(bitmap!=null){Matrix matrix=new Matrix();matrix.postRotate(e.rotation);
             if(e.characteristics!=null&&Integer.valueOf(android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING)))matrix.postScale(-1,1);
             Bitmap next=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),bitmap.getHeight(),matrix,true);preview.setImageBitmap(next);
@@ -208,6 +213,6 @@ public class MainActivity extends Activity {
     }
     String localAddresses(){List<String> ips=new ArrayList<>();try{for(NetworkInterface n:Collections.list(NetworkInterface.getNetworkInterfaces()))for(InetAddress a:Collections.list(n.getInetAddresses()))if(a instanceof Inet4Address&&a.isSiteLocalAddress())ips.add(a.getHostAddress());}catch(Exception ignored){}return String.join(", ",ips);}
     void installUpdate(){CameraEngine e=engine();if(e!=null&&(e.recording||e.photoPending))return;if(!getPackageManager().canRequestPackageInstalls()){startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));return;}stopService(new Intent(this,CameraService.class));Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://"+getPackageName()+".updates/update.apk"),"application/vnd.android.package-archive");intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(intent);}
-    @Override protected void onResume(){super.onResume();resumed=true;orientation.enable();ui.post(refresh);}
-    @Override protected void onPause(){resumed=false;CameraEngine e=engine();if(e!=null)e.hideLocal();ui.removeCallbacks(refresh);orientation.disable();super.onPause();}
+    @Override protected void onResume(){super.onResume();resumed=true;orientation.enable();ui.post(refresh);ui.post(frames);}
+    @Override protected void onPause(){resumed=false;CameraEngine e=engine();if(e!=null)e.hideLocal();ui.removeCallbacks(refresh);ui.removeCallbacks(frames);orientation.disable();super.onPause();}
 }
