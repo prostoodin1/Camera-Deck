@@ -82,7 +82,11 @@ final class CameraEngine implements AutoCloseable {
             Integer facing = manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);
             if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) { cameraId = id; break; }
         }
-        if (cameraId.isEmpty()) cameraId = manager.getCameraIdList()[0];
+        if (cameraId.isEmpty()) {
+            String[] ids=manager.getCameraIdList();
+            if(ids.length==0)throw new IOException("На устройстве нет доступных камер");
+            cameraId=ids[0];
+        }
         handler.post(() -> { try { open(cameraId); } catch (Exception e) { fail(e); } });
         handler.postDelayed(powerTick, 1000);
     }
@@ -249,7 +253,11 @@ final class CameraEngine implements AutoCloseable {
             b.set(CaptureRequest.SENSOR_FRAME_DURATION, Math.max(1_000_000_000L/(recorder!=null?videoFps:power.fps()), exposure));
         } else b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
         if (focus >= 0) { b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF); b.set(CaptureRequest.LENS_FOCUS_DISTANCE, focus); }
-        else b.set(CaptureRequest.CONTROL_AF_MODE, recorder != null ? CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO : CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+        else {
+            int preferred=recorder!=null?CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO:CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE;
+            int[] modes=characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES);
+            b.set(CaptureRequest.CONTROL_AF_MODE,CameraModes.autofocus(modes,preferred));
+        }
     }
 
     void repeat() throws Exception {

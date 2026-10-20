@@ -76,14 +76,21 @@ class CameraClient:
         context.verify_mode = ssl.CERT_NONE  # explicit certificate pin below
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         conn = http.client.HTTPSConnection(self.host, 39812, timeout=8, context=context)
-        conn.connect()
-        actual = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
-        if not probe and (not self.fingerprint or actual != self.fingerprint):
+        try:
+            try:
+                conn.connect()
+            except OSError as error:
+                raise ConnectionError(connection_message(error)) from error
+            actual = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+            if not probe and (not self.fingerprint or actual != self.fingerprint):
+                raise ssl.SSLError("Сертификат телефона изменился. Сравните отпечаток на телефоне и подключитесь заново.")
+            if probe:
+                self.fingerprint = actual
+            return conn
+        except Exception:
             conn.close()
-            raise ssl.SSLError("Сертификат телефона изменился. Сравните отпечаток на телефоне и подключитесь заново.")
-        if probe:
-            self.fingerprint = actual
-        return conn
+            raise
+
 
     def probe(self) -> str:
         conn = self.connection(probe=True)
@@ -171,3 +178,19 @@ class CameraClient:
                     raise ConnectionError(json.loads(data).get("error", f"HTTP {response.status}"))
         finally:
             conn.close()
+
+
+def connection_message(error: Exception) -> str:
+    """Actionable connection failures without weakening TLS or certificate pinning."""
+    if isinstance(error, ssl.SSLError):
+        if "Сертификат телефона" in str(error):
+            return str(error)
+        return ("Телефон прервал защищённое подключение. Обновите Camera Deck на телефоне и компьютере, "
+                "затем выключите и включите камеру на телефоне и повторите подключение.\n\n"
+                "Если ошибка повторится, проверьте VPN и фильтрацию сети.\n"
+                f"Подробности: {error}")
+    if isinstance(error, (TimeoutError, OSError)):
+        return ("Не удалось связаться с телефоном. Включите камеру в приложении, проверьте общую Wi-Fi сеть "
+                "и IP-адрес. При необходимости разрешите Camera Deck в брандмауэре для частной сети.\n\n"
+                f"Подробности: {error}")
+    return str(error)

@@ -293,14 +293,14 @@ class Window(QMainWindow):
         self.available = None
         self.checking = False
         self.setStyleSheet(THEME)
-        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(14,12,14,10);layout.setSpacing(8)
+        root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(24,22,24,18);layout.setSpacing(16)
         brand=QHBoxLayout()
-        title = QLabel("CAMERA DECK"); title.setStyleSheet("font-size:21px;font-weight:700;letter-spacing:2px;color:#f2c94c");brand.addWidget(title)
-        subtitle = QLabel("REMOTE CAMERA CONTROL"); subtitle.setStyleSheet("font-size:10px;color:#777777;letter-spacing:2px");brand.addWidget(subtitle);brand.addStretch()
-        self.connection_count=QLabel("NO SOURCE");self.connection_count.setStyleSheet("font-family:'Consolas';color:#f2c94c");brand.addWidget(self.connection_count)
+        title = QLabel("Camera Deck"); title.setStyleSheet("font-size:26px;font-weight:600;color:#edf2fa");brand.addWidget(title)
+        subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#8e9db3");brand.addWidget(subtitle);brand.addStretch()
+        self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#8cbdff");brand.addWidget(self.connection_count)
         layout.addLayout(brand)
         bar = QHBoxLayout()
-        self.device_list = QComboBox(); self.device_list.setMinimumWidth(280)
+        self.device_list = QComboBox(); self.device_list.setMinimumWidth(200); self.device_list.setPlaceholderText("Выберите телефон")
         self.scan = QPushButton("Найти телефоны"); self.scan.clicked.connect(self.scan_devices)
         connect = QPushButton("Подключить");connect.setObjectName("primary"); connect.clicked.connect(self.connect_device)
         manual = QPushButton("По IP"); manual.clicked.connect(self.manual)
@@ -314,8 +314,14 @@ class Window(QMainWindow):
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         self.grid_widget = QWidget(); self.grid_widget.setObjectName("cameraGrid"); self.grid = QGridLayout(self.grid_widget);self.grid.setContentsMargins(0,0,0,0);self.grid.setSpacing(10); self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(self.grid_widget); layout.addWidget(scroll,1)
-        self.empty = QLabel("Подключите Pixel 8 Pro или Galaxy S22 Ultra\n\nИмя устройства и PIN появятся на экране телефона.\nЕсли поиск не нашёл телефон — используйте «По IP».")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:16px;color:#777777")
+        self.empty = QLabel("<span style='font-size:34px;color:#edf2fa'>Ваша камера. Больше возможностей.</span><br><br>"
+            "Подключите Android-телефон любой марки<br><br>"
+            "<span style='color:#b9c8df'>1 · Откройте Camera Deck на телефоне и включите камеру<br>"
+            "2 · Подключите оба устройства к одной Wi-Fi сети<br>"
+            "3 · Нажмите «Найти телефоны» и введите PIN</span><br><br>"
+            "<span style='font-size:12px'>Android 9+ · Возможности съёмки определяются камерой телефона<br>"
+            "Телефон не найден? Подключитесь по IP из раздела «Подключить» на телефоне.</span>")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:15px;color:#8e9db3;line-height:1.6;background:#111b29;border:1px solid #29394f;border-radius:24px;padding:30px")
         self.grid.addWidget(self.empty,0,0)
         bottom = QHBoxLayout()
         self.auto = QCheckBox("Автообновления")
@@ -329,6 +335,7 @@ class Window(QMainWindow):
         for widget in (check,self.install_button): bottom.addWidget(widget)
         layout.addLayout(bottom)
         self.timer = QTimer(self); self.timer.timeout.connect(lambda: self.check_update() if self.auto.isChecked() else None); self.timer.start(3600000)
+        if auto_checks: QTimer.singleShot(300, self.scan_devices)
         if auto_checks: QTimer.singleShot(1200, lambda: self.check_update() if self.auto.isChecked() else None)
 
     def load_preferences(self):
@@ -369,6 +376,7 @@ class Window(QMainWindow):
     def connect_device(self):
         item = self.device_list.currentData()
         if item: self.begin_connect(item["host"],item["name"],item["fingerprint"])
+        else: self.scan_devices()
 
     def manual(self):
         ip, ok = QInputDialog.getText(self,"Подключение по IP","IPv4-адрес из Android-приложения:")
@@ -383,12 +391,30 @@ class Window(QMainWindow):
             if announced and fp != announced:
                 self.message("Сертификат","Отпечаток из поиска отличается от сертификата. Повторите подключение по IP и сравните отпечаток на телефоне."); return
             formatted = " ".join(fp[i:i+8] for i in range(0,len(fp),8))
-            if QMessageBox.question(self,"Проверьте телефон",f"{name} · {host}\n\nSHA-256 TLS:\n{formatted}\n\nЭтот отпечаток полностью совпадает с отпечатком на экране телефона?") != QMessageBox.StandardButton.Yes: return
-            pin, ok = QInputDialog.getText(self,"Сопряжение", "Четырёхзначный PIN на телефоне:",QLineEdit.EchoMode.Password)
-            if not ok: return
+            dialog = QDialog(self); dialog.setWindowTitle("Подключить телефон"); dialog.setMinimumWidth(480)
+            form = QFormLayout(dialog); form.setSpacing(16)
+            form.addRow(QLabel(f"{name} · {host}"))
+            note = QLabel("Откройте «Подключить» на телефоне. Сравните весь отпечаток и введите PIN.")
+            note.setWordWrap(True); form.addRow(note)
+            fingerprint = QLabel(formatted); fingerprint.setWordWrap(True)
+            fingerprint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            form.addRow("SHA-256", fingerprint)
+            verified = QCheckBox("Отпечаток полностью совпадает с телефоном"); form.addRow(verified)
+            pin = QLineEdit(); pin.setPlaceholderText("0000"); pin.setMaxLength(4)
+            pin.setEchoMode(QLineEdit.EchoMode.Password); form.addRow("PIN телефона", pin)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            accept = buttons.button(QDialogButtonBox.StandardButton.Ok); accept.setText("Подключить"); accept.setObjectName("primary")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
+            def validate():
+                value = pin.text()
+                accept.setEnabled(verified.isChecked() and len(value)==4 and value.isascii() and value.isdigit())
+            verified.toggled.connect(validate); pin.textChanged.connect(validate); validate()
+            buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); form.addRow(buttons)
+            pin.setFocus()
+            if dialog.exec() != QDialog.DialogCode.Accepted: return
             def paired(result):
                 tile = CameraTile(self,client,result.get("name",name)); self.tiles.append(tile); self.rebuild()
-            self.run(lambda: client.pair(pin.strip()),paired)
+            self.run(lambda: client.pair(pin.text()),paired)
         self.run(client.probe,confirm)
 
     def remove(self,tile):
@@ -397,7 +423,7 @@ class Window(QMainWindow):
         QTimer.singleShot(10000,tile.deleteLater)
 
     def rebuild(self):
-        self.connection_count.setText(f"{len(self.tiles):02d} SOURCE" if self.tiles else "NO SOURCE")
+        self.connection_count.setText(f"Камер: {len(self.tiles)}" if self.tiles else "Нет подключённых камер")
         current = self.filter.currentText()
         groups = sorted({tile.group.text().strip() or "Общая" for tile in self.tiles})
         self.filter.blockSignals(True); self.filter.clear(); self.filter.addItems(["Все группы",*groups]); self.filter.setCurrentText(current if current in groups else "Все группы"); self.filter.blockSignals(False)

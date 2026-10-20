@@ -104,25 +104,20 @@ public class CameraService extends Service {
             KeyPairGenerator gen = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore");
             gen.initialize(new KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
                 .setAlgorithmParameterSpec(new ECGenParameterSpec("secp256r1"))
-                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
+                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA384, KeyProperties.DIGEST_SHA512)
                 .setCertificateSubject(new javax.security.auth.x500.X500Principal("CN=CameraDeck"))
                 .setCertificateSerialNumber(java.math.BigInteger.valueOf(System.currentTimeMillis()))
                 .setCertificateNotBefore(new Date(System.currentTimeMillis() - 86400000))
                 .setCertificateNotAfter(new Date(System.currentTimeMillis() + 315360000000L)).build());
             gen.generateKeyPair();
         }
-        PrivateKey key = (PrivateKey)store.getKey(alias, null);
         X509Certificate cert = (X509Certificate)store.getCertificate(alias);
         fingerprint = hex(MessageDigest.getInstance("SHA-256").digest(cert.getEncoded()));
-        X509KeyManager km = new X509KeyManager() {
-            public String[] getClientAliases(String t, java.security.Principal[] i) { return null; }
-            public String chooseClientAlias(String[] t, java.security.Principal[] i, Socket s) { return null; }
-            public String[] getServerAliases(String t, java.security.Principal[] i) { return t.equals("EC") ? new String[]{alias} : null; }
-            public String chooseServerAlias(String t, java.security.Principal[] i, Socket s) { return t.equals("EC") ? alias : null; }
-            public X509Certificate[] getCertificateChain(String a) { return new X509Certificate[]{cert}; }
-            public PrivateKey getPrivateKey(String a) { return key; }
-        };
-        SSLContext ssl = SSLContext.getInstance("TLSv1.2"); ssl.init(new KeyManager[]{km}, null, random);
+        // Let Android select aliases and signature algorithms for its own keystore.
+        // Keep the existing identity so paired users see the same fingerprint.
+        KeyManagerFactory managers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        managers.init(store, null);
+        SSLContext ssl = SSLContext.getInstance("TLS"); ssl.init(managers.getKeyManagers(), null, random);
         return ssl.getServerSocketFactory();
     }
     static String hex(byte[] bytes) { StringBuilder s = new StringBuilder(); for (byte b : bytes) s.append(String.format(Locale.US, "%02x", b & 255)); return s.toString(); }

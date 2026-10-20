@@ -5,6 +5,8 @@ desktop/build/
 desktop/dist/
 *.spec
 __pycache__/
+.venv/
+outputs/
 .pytest_cache/
 release/
 *.jks

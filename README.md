@@ -2,9 +2,9 @@
 
 Android cameras controlled from a Windows desk. Public source, signed APK/EXE releases and anonymous updates: [prostoodin1/Camera-Deck](https://github.com/prostoodin1/Camera-Deck).
 
-Version **0.4.0 is an experimental prerelease**, initially intended for Pixel 8 Pro and Galaxy S22 Ultra. Neither phone has been connected to the development machine during validation. An APK build or passing desktop tests does not demonstrate real camera compatibility, latency or long-session reliability.
+Version **0.5.0 is an experimental prerelease** for Android 9+ phones of any brand with Camera2. No manufacturer allowlist is used. Real phones have not been connected to the development machine during validation. An APK build or passing desktop tests does not demonstrate real camera compatibility, latency or long-session reliability.
 
-Both native apps now use an original black/yellow camera-console interface: large viewfinders, compact exposure readouts and clearly separated recording controls. On Android, connection, capture and power controls open in dedicated panels. This is not a Sony product and uses no Sony branding or assets.
+Both native apps use a minimal midnight-blue interface, rounded controls and soft photographic backdrops around the Windows viewfinder. Android dialogs use system blur on Android 12+ when cross-window blur is enabled, with opaque panels otherwise. Phone preview is enabled by default; the PIN is visible on the main screen and available lenses are one tap away. No Sony branding or assets are used.
 
 ## Screenshots: functional test stand
 
@@ -20,15 +20,15 @@ Reproduce with `python scripts/capture_demo.py`. The development simulator liste
 
 ## First connection
 
-1. Install `CameraDeck-Android-0.4.0.apk` on each phone. Open it, press **ВКЛ** and grant camera and microphone access. Open **ПОДКЛ.** for the name, PIN, IP and fingerprint. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission. Local **VIEW** starts disabled; enable it if you need an on-phone preview.
-2. Run `CameraDeck-Windows-0.4.0.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
+1. Install `CameraDeck-Android-0.5.0.apk` on each phone. Open it, press **Включить** and grant camera and microphone access. Open **Подключить** for the name, PIN, IP and fingerprint. Notifications provide a Stop action. After upgrading, stop/start the camera in the visible app to grant the new microphone permission. The on-phone preview starts automatically after permission is granted; **Показывать камеру** pauses it when desired. **Объектив** selects cameras exposed by Android, including front-facing and external cameras.
+2. Run `CameraDeck-Windows-0.5.0.exe` on Windows 10/11 x64. No Python installation is needed. Connect the computer and phones to the same trusted Wi-Fi/LAN. Update both applications for the new controls.
 3. Press **Найти телефоны**, select a device and **Подключить**. If discovery fails, enter the IPv4 address displayed by the phone using **По IP**. Guest Wi-Fi/client isolation and Windows Firewall can block discovery; use a Private network and allow Camera Deck only on that network. Do not expose the ports to the Internet.
-4. Compare the **entire SHA-256 TLS fingerprint** shown by both apps, confirm the match and enter the phone's four-digit PIN. The comparison is required for first pairing, including manual IP connections.
+4. Compare the **entire SHA-256 TLS fingerprint** shown by both apps, tick the match confirmation and enter the phone's four-digit PIN in the same dialog. The comparison is required for first pairing, including manual IP connections.
 5. Repeat for the second phone. Give each tile a group name and use the group selector / column selector to arrange the desk.
 
 ## Implemented in this preview
 
-- Camera2 capture with runtime camera capability/range reporting. Only camera IDs exposed by Android are selectable; access to every physical lens or vendor camera feature is not promised.
+- Camera2 capture with runtime camera capability/range reporting and supported-mode autofocus fallback for fixed-focus and limited cameras. Only camera IDs exposed by Android are selectable; access to every physical lens or vendor camera feature is not promised.
 - JPEG preview around 640 pixels wide, **up to 5fps in the default Eco mode**, or up to 10fps with Eco disabled on the phone, using latest-frame delivery. This is the initial diagnostic transport, not a finished low-latency H.264/WebRTC stream. Measured latency is not yet available.
 - Explicit **Фото / Видео** selector per camera. Stop recording before switching mode, resolution, FPS or photo format.
 - Recording sizes up to 3840×2160 and normal-session target rates up to 60fps, filtered by Camera2 size/minimum-frame-duration, AE ranges and H.264 encoder support. FPS options depend on the selected size. High-speed/120fps sessions are not implemented. Automatic exposure may vary below a selected range ceiling; actual output and simultaneous-stream combinations require phone validation.
@@ -47,7 +47,7 @@ No GitHub account, Git installation or token is required for installed apps to c
 Versions through 0.3.0 checked the previous development repository. Download/install 0.3.1 or newer from this public repository once to switch channels; subsequent updates use this public repository automatically. Install the APK over the existing app rather than uninstalling it, to keep recordings.
 
 - Windows downloads a newer EXE automatically, verifies its signed metadata, size and SHA-256, and offers **Обновить Windows**. Confirming an idle restart replaces the EXE and keeps `<exe>.previous` for recovery. Current recordings or unknown camera states block installation. The initial EXE has no Windows Authenticode publisher certificate and may trigger SmartScreen.
-- For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone open **ПИТАНИЕ → УСТАНОВИТЬ ОБНОВЛЕНИЕ**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
+- For Android, press **Обновить Android** on its connected tile. Windows obtains the APK, checks the signed manifest and hash and transfers it over the paired TLS channel. Android independently verifies the RSA signature, hash, package ID, version code and existing APK signing certificate. On the phone open **Ещё → Установить обновление**, permit this app as an installation source if needed and confirm Android's installer. Silent installation is not claimed.
 - Ordinary APK updates keep data; **never uninstall to update**. A complete real-device update from version N to N+1 has not yet been exercised.
 
 No shared GitHub credential is embedded in either app. Android updates are fetched by Windows from public releases and passed to the phone. Camera control itself does not need Internet access.
@@ -68,13 +68,17 @@ Start the camera while the Android application is visible, then press **Прод
 
 Eco is enabled by default and saved between launches. It reduces JPEG encoding quality from 72 to 60 and caps preview encoding and Windows frame requests at 5fps, without changing recording targets. The sensor FPS range comes from the device; a 5fps sensor mode is not assumed. Recording keeps the selected target FPS. Microphone capture, PCM transmission and AAC encoding also consume battery when enabled.
 
-Local preview on the phone is optional and off by default. The screen is never kept awake automatically. Minimizing the Windows desk, hiding a camera by group or unchecking **Предпросмотр** stops its frame requests; status checks slow to once every three seconds. Other visible desks may still request preview. Stopping preview never stops an active recording.
+Local preview on the phone is on by default while the activity is visible and can be paused with **Показывать камеру**. It uses the current JPEG transport (5fps Eco / 10fps normal), rather than a full-rate native viewfinder. The screen is never kept awake automatically. Minimizing the Windows desk, hiding a camera by group or unchecking **Предпросмотр** stops its frame requests; status checks slow to once every three seconds. Other visible desks may still request preview. Stopping preview never stops an active recording.
 
 Within four seconds of the last remote frame request (plus up to one second for the policy timer), when there is no local preview, pending operation or recording, the app stops Camera2 repeating requests and JPEG work. It retains the open camera/session for resumption inside the already-started foreground service; it does not claim to fully power down every manufacturer's camera hardware. A new preview request or capture command resumes work. During recording with no viewer the repeating request targets only the hardware recorder surface; it does not produce preview images.
 
 The CPU wake lock has a 90-second safety timeout and is renewed only for preview, recording, microphone listeners, camera transitions or file/update transfer. It is released in standby when sound is unused. There is no automatic battery-optimization exemption, permanent polling wakeup or Wi-Fi lock. Deep Doze / manufacturer power saving may delay networking; instant wake and negligible drain are not promised. See [foreground service rules](https://developer.android.com/develop/background-work/services/fgs/service-types) and [Doze networking restrictions](https://developer.android.com/training/monitoring-device-state/doze-standby).
 
-Battery drain, thermal behaviour and uninterrupted screen-off recording still require measurements on both real phones. Compare Eco and normal mode under the same Wi-Fi, scene, brightness and recording workload before quoting a percentage-per-hour saving.
+Battery drain, thermal behaviour and uninterrupted screen-off recording still require measurements on real phones from different manufacturers. Compare Eco and normal mode under the same Wi-Fi, scene, brightness and recording workload before quoting a percentage-per-hour saving.
+
+## Connection recovery
+
+Android now uses its platform KeyManagerFactory with the existing AndroidKeyStore identity instead of a custom EC-only alias selector. New keys authorize SHA-256/384/512 signatures. Existing keys and fingerprints are preserved. Windows closes failed handshake sockets and shows recovery steps for TLS EOF and unreachable devices. Certificate pinning remains mandatory before credentials are sent. These changes address TLS interoperability risks; the reported EOF still needs confirmation on the affected physical phone.
 
 ## Protocol and security
 
@@ -94,7 +98,7 @@ Android: JDK 17, Gradle 8.7, Android SDK platform 35 and build-tools 35.0.0. Set
 
 `python -m pytest tests -q` checks update signatures, tampering, rollback rejection, unsafe metadata, TLS pin-before-credentials, redirect credentials, DPAPI, bounded PCM queues, unknown audio rejection, capture controls, preview suspension and pure-Java power transitions (requires JDK). Android JVM tests validate mode/rate/format combinations with fixture capabilities. None exercises actual microphones, speakers, codecs, RAW hardware or a real phone. After building, `python scripts/package_release.py` creates APK, EXE, signed update envelope and checksums under `release/<version>/`; the source ZIP comes from the tracked Git tree.
 
-Before calling this ready for daily shooting, verify each phone's lenses/manual controls, orientation, photo output, MP4 playback, preview latency, two-camera bandwidth, Wi-Fi interruptions, foreground/background/screen-off operation, heating and an actual signed N→N+1 update. No such hardware results are claimed by this prerelease.
+Before calling this ready for daily shooting, verify each target phone's lenses/manual controls, orientation, photo output, MP4 playback, preview latency, two-camera bandwidth, Wi-Fi interruptions, foreground/background/screen-off operation, heating and an actual signed N→N+1 update. No such hardware results are claimed by this prerelease.
 
 ## License
 

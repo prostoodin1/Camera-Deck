@@ -1,16 +1,17 @@
 <resources>
     <style name="CameraDeckTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#F2C94C</item>
-        <item name="android:windowBackground">#080808</item>
-        <item name="android:colorBackground">#080808</item>
-        <item name="android:colorForeground">#E9E9E9</item>
-        <item name="android:textColorPrimary">#E9E9E9</item>
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:colorAccent">#8CBDFF</item>
+        <item name="android:windowBackground">#0B1019</item>
+        <item name="android:colorBackground">#0B1019</item>
+        <item name="android:colorForeground">#EDF2FA</item>
+        <item name="android:textColorPrimary">#EDF2FA</item>
         <item name="android:textColorSecondary">#999999</item>
         <item name="android:colorControlNormal">#888888</item>
-        <item name="android:colorControlActivated">#F2C94C</item>
-        <item name="android:statusBarColor">#080808</item>
-        <item name="android:navigationBarColor">#080808</item>
+        <item name="android:colorControlActivated">#8CBDFF</item>
+        <item name="android:statusBarColor">#0B1019</item>
+        <item name="android:navigationBarColor">#0B1019</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

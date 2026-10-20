@@ -66,6 +66,19 @@ def test_certificate_pin_checked_before_request(monkeypatch):
     assert not Connection.sent
 
 
+def test_aborted_tls_closes_socket_and_explains_recovery(monkeypatch):
+    class Connection:
+        closed=False
+        def __init__(self,*args,**kwargs): pass
+        def connect(self): raise ssl.SSLEOFError("UNEXPECTED_EOF_WHILE_READING")
+        def close(self): Connection.closed=True
+        def request(self,*args,**kwargs): pytest.fail("Credentials sent after failed handshake")
+    monkeypatch.setattr(protocol.http.client,"HTTPSConnection",Connection)
+    with pytest.raises(ConnectionError,match="Обновите Camera Deck"):
+        protocol.CameraClient("192.168.1.2").pair("1234")
+    assert Connection.closed
+
+
 @pytest.mark.parametrize("host",["8.8.8.8","127.0.0.1","0.0.0.0","224.0.0.1","example.org","::1"])
 def test_nonlocal_addresses_rejected(host):
     with pytest.raises(ValueError): protocol.local_host(host)
