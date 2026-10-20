@@ -1,0 +1,12 @@
+android/.gradle/
+android/**/build/
+android/local.properties
+desktop/build/
+desktop/dist/
+*.spec
+__pycache__/
+.pytest_cache/
+release/
+*.jks
+*.keystore
+*-private.pem

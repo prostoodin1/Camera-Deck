@@ -1,0 +1,33 @@
+plugins { id 'com.android.application' }
+def releaseVersion = new groovy.json.JsonSlurper().parse(file('../../version.json'))
+android {
+    namespace 'io.github.prostoodin1.cameradeck'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'io.github.prostoodin1.cameradeck'
+        minSdk 28
+        targetSdk 35
+        versionCode releaseVersion.code
+        versionName releaseVersion.version
+        buildConfigField 'int', 'PROTOCOL_VERSION', '1'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    signingConfigs {
+        release {
+            if (System.getenv('CAMERA_DECK_KEYSTORE')) {
+                storeFile file(System.getenv('CAMERA_DECK_KEYSTORE'))
+                storePassword System.getenv('CAMERA_DECK_STORE_PASSWORD')
+                keyAlias 'camera-deck'
+                keyPassword System.getenv('CAMERA_DECK_STORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes { release { signingConfig signingConfigs.release; minifyEnabled false } }
+}
+dependencies {
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}

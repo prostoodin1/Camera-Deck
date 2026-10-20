@@ -1,0 +1,173 @@
+"""Local protocol. TLS identity is checked BEFORE sending the PIN or token."""
+from __future__ import annotations
+import hashlib
+import http.client
+import ipaddress
+import json
+import socket
+import ssl
+import time
+from pathlib import Path
+from urllib.parse import urlencode
+
+DISCOVERY_PORT = 39811
+MAX_JSON = 1_000_000
+
+
+def local_host(host: str) -> str:
+    address = ipaddress.ip_address(host)
+    if address.version != 4 or not address.is_private or address.is_loopback or address.is_unspecified or address.is_multicast:
+        raise ValueError("Укажите локальный IPv4-адрес телефона")
+    return str(address)
+
+
+def discover(seconds: float = 2.0) -> list[dict]:
+    devices = {}
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.bind(("0.0.0.0", 0))
+        sock.settimeout(0.2)
+        targets = {"255.255.255.255"}
+        try:
+            # Limited broadcast plus interface broadcasts, including /20 and /23 LANs.
+            import subprocess
+            result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                "Get-NetIPAddress -AddressFamily IPv4 | Select-Object IPAddress,PrefixLength | ConvertTo-Json -Compress"],
+                capture_output=True, text=True, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            interfaces = json.loads(result.stdout or "[]")
+            for interface in interfaces if isinstance(interfaces, list) else [interfaces]:
+                network = ipaddress.ip_network(f"{interface['IPAddress']}/{interface['PrefixLength']}", strict=False)
+                if network.is_private and not network.is_loopback:
+                    targets.add(str(network.broadcast_address))
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+            pass
+        for target in targets:
+            try:
+                sock.sendto(b"CAMERA_DECK_DISCOVER_V1", (target, DISCOVERY_PORT))
+            except OSError:
+                pass
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            try:
+                data, (host, _) = sock.recvfrom(4096)
+                item = json.loads(data)
+                fp = item.get("fingerprint", "")
+                if item.get("protocol") != 1 or len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
+                    continue
+                if item.get("port") != 39812 or not isinstance(item.get("id"), str):
+                    continue
+                item["host"] = local_host(host)
+                item["name"] = str(item.get("name", "Камера"))[:60]
+                devices[item["id"]] = item
+            except (socket.timeout, ValueError, KeyError, TypeError):
+                continue
+    return list(devices.values())
+
+
+class CameraClient:
+    def __init__(self, host: str, fingerprint: str = ""):
+        self.host = local_host(host)
+        self.fingerprint = fingerprint.replace(" ", "").lower()
+        self.token = ""
+
+    def connection(self, probe: bool = False) -> http.client.HTTPSConnection:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE  # explicit certificate pin below
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        conn = http.client.HTTPSConnection(self.host, 39812, timeout=8, context=context)
+        conn.connect()
+        actual = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+        if not probe and (not self.fingerprint or actual != self.fingerprint):
+            conn.close()
+            raise ssl.SSLError("Сертификат телефона изменился. Сравните отпечаток на телефоне и подключитесь заново.")
+        if probe:
+            self.fingerprint = actual
+        return conn
+
+    def probe(self) -> str:
+        conn = self.connection(probe=True)
+        conn.close()
+        return self.fingerprint
+
+    def request(self, path: str, method: str = "GET", body: bytes | None = None,
+                extra: dict | None = None, limit: int = MAX_JSON) -> bytes:
+        conn = self.connection()
+        try:
+            headers = {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
+            headers.update(extra or {})
+            conn.request(method, path, body=body, headers=headers)
+            response = conn.getresponse()
+            result = response.read(limit + 1)
+            if len(result) > limit:
+                raise ValueError("Ответ телефона слишком большой")
+            if response.status != 200:
+                try:
+                    message = json.loads(result).get("error", str(response.status))
+                except ValueError:
+                    message = f"HTTP {response.status}"
+                raise ConnectionError(message)
+            return result
+        finally:
+            conn.close()
+
+    def json(self, path: str, body: dict | None = None) -> dict:
+        return json.loads(self.request(path, "POST" if body is not None else "GET",
+                                       json.dumps(body).encode() if body is not None else None))
+
+    def pair(self, pin: str) -> dict:
+        if len(pin) != 4 or not pin.isascii() or not pin.isdigit():
+            raise ValueError("PIN состоит из четырёх цифр")
+        result = self.json("/pair", {"pin": pin})
+        self.token = result["token"]
+        return result
+
+    def command(self, action: str, **kwargs) -> dict:
+        return self.json("/command", {"action": action, **kwargs})
+
+    def download(self, filename: str, folder: Path) -> Path:
+        import re
+        if not re.fullmatch(r"CD_\d+_[a-f0-9]{8}\.(jpg|png|webp|dng|mp4)", filename):
+            raise ValueError("Недопустимое имя файла")
+        target = folder / filename
+        if target.exists():
+            raise FileExistsError(f"Файл уже существует: {filename}")
+        partial = target.with_suffix(target.suffix + ".partial")
+        conn = self.connection()
+        try:
+            conn.request("GET", "/file?" + urlencode({"name": filename}), headers={"Authorization": "Bearer " + self.token})
+            response = conn.getresponse()
+            if response.status != 200:
+                raise ConnectionError(f"Скачивание: HTTP {response.status}")
+            expected = int(response.getheader("Content-Length", "-1"))
+            if expected < 1:
+                raise ValueError("Неизвестный размер файла")
+            count = 0
+            with partial.open("xb") as out:
+                while chunk := response.read(256 * 1024):
+                    out.write(chunk)
+                    count += len(chunk)
+            if count != expected:
+                raise ValueError("Файл скачан не полностью")
+            partial.rename(target)
+            return target
+        finally:
+            conn.close()
+            partial.unlink(missing_ok=True)
+
+    def send_update(self, apk: Path, envelope: bytes) -> None:
+        import base64
+        conn = self.connection()
+        try:
+            conn.sock.settimeout(120)
+            with apk.open("rb") as source:
+                conn.request("PUT", "/update", body=source, headers={
+                    "Authorization": "Bearer " + self.token, "Content-Length": str(apk.stat().st_size),
+                    "Content-Type": "application/octet-stream",
+                    "X-Update-Manifest": base64.b64encode(envelope).decode("ascii")})
+                response = conn.getresponse()
+                data = response.read(16384)
+                if response.status != 200:
+                    raise ConnectionError(json.loads(data).get("error", f"HTTP {response.status}"))
+        finally:
+            conn.close()
