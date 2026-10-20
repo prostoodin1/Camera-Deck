@@ -89,7 +89,7 @@ final class CaptureStore {
         File file=new File(internal,name);if(file.isFile())return ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY);
         if(tree()!=null){Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree(),DocumentsContract.getTreeDocumentId(tree()));
             try(Cursor c=context.getContentResolver().query(children,new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
-                if(c!=null)while(c.moveToNext())if(name.equals(c.getString(1))){ParcelFileDescriptor fd=context.getContentResolver().openFileDescriptor(DocumentsContract.buildDocumentUriUsingTree(tree(),c.getString(0))),"r");if(fd!=null)return fd;}
+                if(c!=null)while(c.moveToNext())if(name.equals(c.getString(1))){ParcelFileDescriptor fd=context.getContentResolver().openFileDescriptor(DocumentsContract.buildDocumentUriUsingTree(tree(),c.getString(0)),"r");if(fd!=null)return fd;}
             }
         }throw new FileNotFoundException("Материал или накопитель недоступен");
     }
