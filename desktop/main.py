@@ -5,17 +5,18 @@ from pathlib import Path
 import sys
 import threading
 import time
+import math
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QImage, QPixmap, QTransform, QFontDatabase, QFont
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QLineEdit, QComboBox, QScrollArea, QInputDialog,
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QSpinBox,
-    QDoubleSpinBox, QCheckBox, QFileDialog, QTabWidget,
+    QDoubleSpinBox, QCheckBox, QFileDialog, QTabWidget, QSlider, QFrame,
 )
-from protocol import CameraClient, discover
+from protocol import CameraClient, discover, StreamUnavailable
 from audio import AudioMonitor
-from appearance import THEME,Viewfinder,shutter_label
+from appearance import THEME,Viewfinder,shutter_label,GlassSheet,Toggle,SliderField
 import updates
 
 
@@ -40,6 +41,9 @@ class CameraTile(QWidget):
         self.preview_enabled.set()
         self.status = {}
         self.failures = 0
+        self.fullscreen=None
+        self.frame_lock=threading.Lock();self.pending_frame=None
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("tile")
         box = QVBoxLayout(self);box.setContentsMargins(10,8,10,8);box.setSpacing(7)
         heading = QHBoxLayout();heading.setSpacing(6)
@@ -52,6 +56,7 @@ class CameraTile(QWidget):
         self.group.editingFinished.connect(window.rebuild)
         remove = QPushButton("Откл.");remove.setToolTip("Отключить эту камеру от пульта")
         remove.clicked.connect(lambda: window.remove(self))
+        full=QPushButton("⛶");full.setToolTip("Открыть камеру во весь экран");full.clicked.connect(self.open_fullscreen);heading.addWidget(full)
         heading.addWidget(self.name, 2); heading.addWidget(self.group, 1); heading.addWidget(remove)
         box.addLayout(heading)
         self.video = Viewfinder()
@@ -76,17 +81,17 @@ class CameraTile(QWidget):
         self.settings_button.clicked.connect(lambda:self.settings(0))
         self.files = QPushButton("Материалы")
         self.files.clicked.connect(self.media)
-        self.mode=QComboBox();self.mode.addItem("PHOTO","photo");self.mode.addItem("MOVIE","video");self.mode.setMaximumWidth(105)
+        self.mode=QComboBox();self.mode.addItem("Фото","photo");self.mode.addItem("Видео","video");self.mode.setMaximumWidth(105)
         self.mode.activated.connect(lambda _:self.command("capture_config",mode=self.mode.currentData()))
         controls.addWidget(self.mode)
         for button in (self.photo, self.record, self.settings_button, self.files): controls.addWidget(button)
         box.addLayout(controls)
         switches=QHBoxLayout()
-        self.view_toggle = QCheckBox("VIEW");self.view_toggle.setToolTip("Передавать изображение с камеры")
+        self.view_toggle = Toggle("Просмотр");self.view_toggle.setToolTip("Передавать изображение с камеры")
         self.view_toggle.setChecked(True)
         self.view_toggle.toggled.connect(window.rebuild)
         switches.addWidget(self.view_toggle)
-        self.listen=QCheckBox("AUDIO MONITOR");self.listen.setToolTip("Слушать микрофон телефона; звук в записи настраивается отдельно")
+        self.listen=Toggle("Слушать звук");self.listen.setToolTip("Слушать микрофон телефона; звук в записи настраивается отдельно")
         self.listen.toggled.connect(self.sync_audio)
         switches.addWidget(self.listen);switches.addStretch();box.addLayout(switches)
         self.monitor=AudioMonitor(client,self);self.monitor.failed.connect(self.audio_failed)
@@ -101,9 +106,11 @@ class CameraTile(QWidget):
         self.feed.failure.connect(self.show_error)
         self.worker = threading.Thread(target=self.poll, daemon=True, name="camera-preview")
         self.worker.start()
+        self.display_timer=QTimer(self);self.display_timer.timeout.connect(self.display_latest);self.display_timer.start(33)
+        self.video.mouseDoubleClickEvent=lambda event:self.open_fullscreen()
 
     def set_preview_active(self, visible):
-        if visible and self.view_toggle.isChecked():
+        if (visible or self.fullscreen is not None) and self.view_toggle.isChecked():
             self.preview_enabled.set()
         else:
             self.preview_enabled.clear()
@@ -120,28 +127,54 @@ class CameraTile(QWidget):
             except Exception as exc:self.audio_failed(str(exc))
         else:self.monitor.stop()
 
-    def poll(self):
-        status = {}
-        next_status = 0
+    def open_fullscreen(self):
+        if self.fullscreen is not None:self.fullscreen.raise_();return
+        dialog=QDialog(self.window);dialog.setWindowTitle(self.name.text());dialog.setStyleSheet(THEME)
+        layout=QVBoxLayout(dialog);bar=QHBoxLayout();bar.addWidget(QLabel(self.name.text()));bar.addStretch();close=QPushButton("Выйти из полного экрана · Esc");close.clicked.connect(dialog.close);bar.addWidget(close);layout.addLayout(bar)
+        view=Viewfinder();layout.addWidget(view,1);view.set_status(self.status)
+        if self.video.frame is not None:view.set_frame(self.video.frame)
+        self.fullscreen=dialog;self.full_view=view
+        def finished():self.fullscreen=None;self.full_view=None;dialog.deleteLater();self.window.rebuild()
+        dialog.finished.connect(finished);dialog.showFullScreen();self.set_preview_active(True)
+
+    def display_latest(self):
+        with self.frame_lock:pending=self.pending_frame;self.pending_frame=None
+        if pending is None:return
+        image,rotation=pending
+        if rotation:image=image.transformed(QTransform().rotate(rotation),Qt.TransformationMode.SmoothTransformation)
+        self.video.set_frame(image)
+        if self.fullscreen is not None:self.full_view.set_frame(image)
+
+    def receive_frames(self):
+        stream_supported=hasattr(self.client,"frames")
         while not self.stopped.is_set():
-            if self.paused.is_set():
-                self.stopped.wait(0.2); continue
+            if not self.preview_enabled.is_set() or self.paused.is_set():self.stopped.wait(.1);continue
             try:
-                if time.monotonic() > next_status:
-                    status = self.client.json("/status")
-                    self.feed.state.emit(status)
-                    next_status = time.monotonic() + (0.8 if self.preview_enabled.is_set() else 3)
-                if not self.preview_enabled.is_set():
-                    self.stopped.wait(0.25); continue
-                frame = self.client.request("/frame", limit=2_000_000)
-                if self.stopped.is_set(): return
-                self.feed.image.emit(frame, status)
-                self.stopped.wait(1/max(1,min(10,status.get("previewFps",10))))
+                if stream_supported:
+                    for data,rotation in self.client.frames(self.stopped,self.preview_enabled):
+                        if self.paused.is_set():break
+                        image=QImage.fromData(data)
+                        if not image.isNull():
+                            with self.frame_lock:self.pending_frame=(image,rotation)
+                else:
+                    data=self.client.request("/frame",limit=2_000_000);image=QImage.fromData(data)
+                    if not image.isNull():
+                        with self.frame_lock:self.pending_frame=(image,self.status.get("rotation",0))
+                    self.stopped.wait(1/max(1,min(30,self.status.get("previewFps",10))))
+            except StreamUnavailable:stream_supported=False
             except Exception as exc:
-                if self.stopped.is_set(): return
+                if self.stopped.is_set():return
+                self.feed.failure.emit(str(exc));self.stopped.wait(1)
+
+    def poll(self):
+        threading.Thread(target=self.receive_frames,daemon=True,name="camera-stream").start()
+        while not self.stopped.is_set():
+            if self.paused.is_set():self.stopped.wait(.2);continue
+            try:self.feed.state.emit(self.client.json("/status"))
+            except Exception as exc:
+                if self.stopped.is_set():return
                 self.feed.failure.emit(str(exc))
-                self.stopped.wait(1)
-                next_status = 0
+            self.stopped.wait(1 if self.preview_enabled.is_set() else 3)
 
     def show_error(self, message):
         self.failures += 1
@@ -161,9 +194,10 @@ class CameraTile(QWidget):
         self.failures = 0
         recording = status.get("recording", False)
         self.video.set_status(status)
-        self.iso_readout.setText("ISO  "+str(status.get("iso") or "—"))
-        self.shutter_readout.setText("S  "+shutter_label(status.get("exposureNs",0)))
-        self.focus_readout.setText("AF-C" if status.get("focus",-1)<0 else f"MF  {status['focus']:.1f}")
+        if self.fullscreen is not None:self.full_view.set_status(status)
+        self.iso_readout.setText("ISO  "+("Авто" if not status.get("manualIso") else str(status.get("manualIso")))+" ▾")
+        self.shutter_readout.setText("Выдержка  "+("Авто" if not status.get("manualExposureNs") else shutter_label(status["manualExposureNs"]))+" ▾")
+        self.focus_readout.setText("Фокус  "+("Авто" if status.get("focus",-1)<0 else f"{status['focus']:.1f}")+" ▾")
         self.profile_readout.setText(f"{status.get('videoHeight',1080)}p {status.get('videoFps',30)}" if status.get("mode")=="video" else status.get("photoFormat","jpg").upper())
         mode=status.get("mode","photo")
         self.mode.setCurrentIndex(1 if mode=="video" else 0);self.mode.setEnabled(not recording and status.get("ready",False))
@@ -173,6 +207,8 @@ class CameraTile(QWidget):
         self.photo.setEnabled(status.get("ready", False) and not recording and mode=="photo")
         self.listen.setEnabled(status.get("audioAvailable",False))
         self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  VIEW ≈640px")
+        free=status.get("storageFreeBytes",-1)
+        if free>=0:self.info.setText(f"{status.get('storageName','Телефон')} · {free/1073741824:.1f} ГБ свободно"+("  ·  "+status['error'] if status.get('error') else ""))
         self.info.setToolTip(status.get("lastFile", ""))
         if status.get("previewBuild"):
             self.phone_update.setEnabled(False); self.phone_update.hide()
@@ -186,10 +222,10 @@ class CameraTile(QWidget):
     def settings(self,initial_tab=0):
         if not self.status: return
         status = self.status
-        dialog = QDialog(self)
+        dialog = GlassSheet(self.window)
         dialog.setWindowTitle("Настройки камеры — " + self.name.text())
         dialog.setMinimumWidth(530)
-        outer=QVBoxLayout(dialog);tabs=QTabWidget();outer.addWidget(tabs)
+        outer=QVBoxLayout(dialog);outer.setContentsMargins(24,24,24,24);tabs=QTabWidget();outer.addWidget(tabs)
         capture_page=QWidget();sensor_page=QWidget()
         capture_page.setObjectName("settingsPage");sensor_page.setObjectName("settingsPage")
         tabs.addTab(capture_page,"Съёмка и форматы");tabs.addTab(sensor_page,"Экспозиция и фокус")
@@ -215,7 +251,7 @@ class CameraTile(QWidget):
             if index>=0:video_rate.setCurrentIndex(index)
         video_size.currentIndexChanged.connect(fill_rates);fill_rates()
         form.addRow("Разрешение видеозаписи",video_size);form.addRow("FPS видеозаписи (целевой)",video_rate)
-        sound=QCheckBox("Записывать звук в MP4 (AAC)");sound.setChecked(status.get("audio",True));form.addRow(sound)
+        sound=Toggle("Звук в видеозаписи");sound.setChecked(status.get("audio",True));form.addRow(sound)
         if not status.get("audioAvailable",False):form.addRow(QLabel("Для звука разрешите микрофон на телефоне и перезапустите камеру."))
         photo_format=QComboBox()
         for fmt in capabilities.get("photoFormats",[]):photo_format.addItem({"jpg":"JPEG","png":"PNG","webp":"WebP","dng":"RAW DNG"}.get(fmt,fmt),fmt)
@@ -233,24 +269,30 @@ class CameraTile(QWidget):
         format_note=QLabel("PNG и WebP создаются из обработанного JPEG. DNG — настоящий RAW,\nесли его предоставляет камера. Менять формат и режим можно после остановки записи.")
         format_note.setWordWrap(True);form.addRow(format_note)
         form=QFormLayout(sensor_page)
-        auto = QCheckBox("Автоматическая экспозиция")
+        auto = Toggle("Автоматическая экспозиция")
         auto.setChecked(not status.get("manualIso"))
         auto.setEnabled(status.get("manualSensor", False))
         form.addRow(auto)
-        iso = QSpinBox(); iso.setRange(status.get("isoMin", 50), status.get("isoMax", 6400)); iso.setValue(status.get("manualIso") or status.get("iso", 100))
-        exposure = QDoubleSpinBox(); exposure.setDecimals(4)
-        exposure.setRange(max(0.0001, status.get("exposureMinNs", 1000)/1e6), min(1000/max(1,status.get("videoFps",30)) if status.get("recording") else 10000, status.get("exposureMaxNs", 100000000)/1e6))
-        exposure.setValue((status.get("manualExposureNs") or status.get("exposureNs", 16666666))/1e6)
+        iso=SliderField(status.get("isoMin",50),status.get("isoMax",6400),status.get("manualIso") or status.get("iso",100))
+        minimum=max(.0001,status.get("exposureMinNs",1000)/1e6)
+        maximum=min(1000/max(1,status.get("videoFps",30)) if status.get("recording") else status.get("exposureMaxNs",100000000)/1e6,status.get("exposureMaxNs",100000000)/1e6)
+        exposure=SliderField(minimum,maximum,(status.get("manualExposureNs") or status.get("exposureNs",16666666))/1e6,4,True)
         form.addRow("ISO", iso); form.addRow("Выдержка, мс", exposure)
         def enable_exposure():
             enabled = not auto.isChecked() and status.get("manualSensor", False)
             iso.setEnabled(enabled); exposure.setEnabled(enabled)
         auto.toggled.connect(enable_exposure); enable_exposure()
-        focus_auto = QCheckBox("Автофокус"); focus_auto.setChecked(status.get("focus", -1) < 0)
-        focus = QDoubleSpinBox(); focus.setRange(0, status.get("focusMax") or 0); focus.setDecimals(2); focus.setValue(max(0, status.get("focus", -1)))
+        focus_auto = Toggle("Автофокус"); focus_auto.setChecked(status.get("focus", -1) < 0)
+        focus=SliderField(0,status.get("focusMax") or 0,max(0,status.get("focus",-1)),2)
         focus_auto.setEnabled(bool(status.get("focusMax"))); focus.setEnabled(not focus_auto.isChecked() and bool(status.get("focusMax")))
         focus_auto.toggled.connect(lambda checked: focus.setEnabled(not checked and bool(status.get("focusMax"))))
         form.addRow(focus_auto); form.addRow("Фокус, диоптрии (0 = ∞)", focus)
+        capabilities_label=QLabel("Возможности объектива: "+str(len(video_modes))+" видеорежимов · "+str(len(capabilities.get("photoSizes",[])))+" размеров фото")
+        capabilities_label.setWordWrap(True);form.addRow(capabilities_label)
+        special=capabilities.get("highSpeedModes",[]);maximum=capabilities.get("maximumSensorSizes",[])
+        if special or maximum:
+            details=QLabel("Специальные сеансы (показаны для справки):\n"+"\n".join(f"High speed · {v['width']} × {v['height']} · "+", ".join(f"{r['min']}–{r['max']} fps" for r in v.get('ranges',[])) for v in special)+"\n"+"\n".join(f"Maximum sensor · {v['width']} × {v['height']}" for v in maximum))
+            details.setWordWrap(True);form.addRow(details)
         note = QLabel("При смене объектива сначала примените выбор, затем откройте настройки снова.\nДоступные диапазоны сообщает сам телефон.")
         note.setWordWrap(True); form.addRow(note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -291,15 +333,19 @@ class Window(QMainWindow):
         super().__init__()
         self.setWindowTitle("Camera Deck · Windows · " + updates.VERSION)
         self.resize(1280, 820)
+        self.setMinimumSize(960,620)
         self.tiles, self.jobs, self.devices = [], [], []
         self.available = None
         self.checking = False
+        self.scanning=False
         self.setStyleSheet(THEME)
         root = QWidget(); root.setObjectName("root"); self.setCentralWidget(root); layout = QVBoxLayout(root); layout.setContentsMargins(24,22,24,18);layout.setSpacing(16)
         brand=QHBoxLayout()
-        title = QLabel("Camera Deck"); title.setStyleSheet("font-size:26px;font-weight:600;color:#edf2fa");brand.addWidget(title)
-        subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#8e9db3");brand.addWidget(subtitle);brand.addStretch()
-        self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#8cbdff");brand.addWidget(self.connection_count)
+        title = QLabel("Camera Deck Aurora"); title.setStyleSheet("font-size:26px;font-weight:600;color:#f4f4f4");brand.addWidget(title)
+        subtitle = QLabel("Камеры рядом. Управление здесь."); subtitle.setStyleSheet("font-size:12px;color:#a5a5a5");brand.addWidget(subtitle);brand.addStretch()
+        self.connection_count=QLabel("Нет подключённых камер");self.connection_count.setStyleSheet("color:#ffd76b");brand.addWidget(self.connection_count)
+        self.devices_button=QPushButton("Устройства");self.devices_button.setCheckable(True);self.devices_button.setChecked(True)
+        self.devices_button.clicked.connect(lambda checked:self.sidebar.setVisible(checked));brand.addWidget(self.devices_button)
         layout.addLayout(brand)
         bar = QHBoxLayout()
         self.device_list = QComboBox(); self.device_list.setMinimumWidth(200); self.device_list.setPlaceholderText("Выберите телефон")
@@ -315,18 +361,26 @@ class Window(QMainWindow):
         self.hint.setStyleSheet("color:#828282;font-size:11px")
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         self.grid_widget = QWidget(); self.grid_widget.setObjectName("cameraGrid"); self.grid = QGridLayout(self.grid_widget);self.grid.setContentsMargins(0,0,0,0);self.grid.setSpacing(10); self.grid.setAlignment(Qt.AlignmentFlag.AlignTop)
-        scroll.setWidget(self.grid_widget); layout.addWidget(scroll,1)
-        self.empty = QLabel("<span style='font-size:34px;color:#edf2fa'>Ваша камера. Больше возможностей.</span><br><br>"
+        scroll.setWidget(self.grid_widget)
+        body=QHBoxLayout();body.setSpacing(18)
+        self.sidebar=QFrame();self.sidebar.setObjectName("tile");self.sidebar.setFixedWidth(270);side=QVBoxLayout(self.sidebar);side.setContentsMargins(16,18,16,18)
+        heading=QLabel("ТЕЛЕФОНЫ РЯДОМ");heading.setStyleSheet("color:#ffd76b;font-size:11px;letter-spacing:2px");side.addWidget(heading)
+        self.device_cards=QWidget();self.device_cards_layout=QVBoxLayout(self.device_cards);self.device_cards_layout.setContentsMargins(0,8,0,8)
+        self.device_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop);side.addWidget(self.device_cards,1)
+        side.addWidget(QLabel("Откройте камеру на телефоне.\nПодключитесь к общей Wi-Fi сети."))
+        body.addWidget(self.sidebar);body.addWidget(scroll,1);layout.addLayout(body,1)
+        self.refresh_devices()
+        self.empty = QLabel("<span style='font-size:34px;color:#f4f4f4'>Ваша камера. Больше возможностей.</span><br><br>"
             "Подключите Android-телефон любой марки<br><br>"
             "<span style='color:#b9c8df'>1 · Откройте Camera Deck на телефоне и включите камеру<br>"
             "2 · Подключите оба устройства к одной Wi-Fi сети<br>"
             "3 · Нажмите «Найти телефоны» и введите PIN</span><br><br>"
             "<span style='font-size:12px'>Android 9+ · Возможности съёмки определяются камерой телефона<br>"
             "Телефон не найден? Подключитесь по IP из раздела «Подключить» на телефоне.</span>")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:15px;color:#8e9db3;line-height:1.6;background:#111b29;border:1px solid #29394f;border-radius:24px;padding:30px")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter); self.empty.setMinimumHeight(360); self.empty.setStyleSheet("font-size:15px;color:#a5a5a5;line-height:1.6;background:#111b29;border:1px solid #29394f;border-radius:24px;padding:30px")
         self.grid.addWidget(self.empty,0,0)
         bottom = QHBoxLayout()
-        self.auto = QCheckBox("Автообновления")
+        self.auto = Toggle("Автообновления")
         self.auto.setChecked(self.load_preferences().get("autoUpdates", True))
         self.auto.toggled.connect(self.save_preferences)
         self.update_label = QLabel("v"+updates.VERSION+" · обновления проверяются автоматически")
@@ -337,6 +391,8 @@ class Window(QMainWindow):
         for widget in (check,self.install_button): bottom.addWidget(widget)
         layout.addLayout(bottom)
         self.timer = QTimer(self); self.timer.timeout.connect(lambda: self.check_update() if self.auto.isChecked() else None); self.timer.start(3600000)
+        self.discovery_timer=QTimer(self);self.discovery_timer.timeout.connect(lambda:self.scan_devices() if self.sidebar.isVisible() else None)
+        if auto_checks:self.discovery_timer.start(8000)
         if auto_checks: QTimer.singleShot(300, self.scan_devices)
         if auto_checks: QTimer.singleShot(1200, lambda: self.check_update() if self.auto.isChecked() else None)
 
@@ -367,13 +423,29 @@ class Window(QMainWindow):
     def message(self, title, body): QMessageBox.information(self,title,body)
 
     def scan_devices(self):
+        if self.scanning:return
+        self.scanning=True
         self.scan.setEnabled(False); self.hint.setText("Ищем телефоны в локальной сети…")
         def done(devices):
-            self.scan.setEnabled(True); self.devices = devices; self.device_list.clear()
+            self.scanning=False;self.scan.setEnabled(True); self.devices = devices;self.refresh_devices(); self.device_list.clear()
             for item in devices: self.device_list.addItem(f"{item['name']} · {item['host']}",item)
             self.hint.setText(f"Найдено: {len(devices)}. Выберите устройство и нажмите «Подключить». Если список пуст — проверьте Wi-Fi и доступ через брандмауэр или введите IP.")
-        def failed(message): self.scan.setEnabled(True); self.hint.setText(message)
+        def failed(message): self.scanning=False;self.scan.setEnabled(True); self.hint.setText(message)
         self.run(discover,done,failed)
+
+    def refresh_devices(self):
+        while self.device_cards_layout.count():
+            item=self.device_cards_layout.takeAt(0)
+            if item.widget():item.widget().deleteLater()
+        if not self.devices:
+            label=QLabel("Ищем доступные телефоны…\n\nНе найден? Нажмите «По IP».");label.setWordWrap(True);self.device_cards_layout.addWidget(label)
+        for device in self.devices:
+            card=QFrame();card.setObjectName("tile");box=QVBoxLayout(card)
+            name=QLabel(device['name']);name.setWordWrap(True);name.setStyleSheet("font-size:15px;font-weight:600");box.addWidget(name)
+            box.addWidget(QLabel(device['host']))
+            connected=any(t.client.host==device['host'] for t in self.tiles)
+            button=QPushButton("Подключён" if connected else "Подключить →");button.setObjectName("primary");button.setEnabled(not connected)
+            button.clicked.connect(lambda checked=False,d=device:self.begin_connect(d['host'],d['name'],d['fingerprint']));box.addWidget(button);self.device_cards_layout.addWidget(card)
 
     def connect_device(self):
         item = self.device_list.currentData()
@@ -420,11 +492,13 @@ class Window(QMainWindow):
         self.run(client.probe,confirm)
 
     def remove(self,tile):
+        if tile.fullscreen is not None:tile.fullscreen.close()
         tile.stopped.set();tile.monitor.stop(); self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
         # Keep QObject alive until its networking thread has observed the stop event.
         QTimer.singleShot(10000,tile.deleteLater)
 
     def rebuild(self):
+        self.refresh_devices()
         self.connection_count.setText(f"Камер: {len(self.tiles)}" if self.tiles else "Нет подключённых камер")
         current = self.filter.currentText()
         groups = sorted({tile.group.text().strip() or "Общая" for tile in self.tiles})

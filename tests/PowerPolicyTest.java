@@ -4,7 +4,7 @@ public final class PowerPolicyTest {
     static void expect(boolean value) { if (!value) throw new AssertionError(); }
     public static void main(String[] args) {
         PowerPolicy policy = new PowerPolicy();
-        expect(policy.eco && policy.fps() == 5);
+        expect(policy.eco && policy.fps() == 12);
         expect(policy.plan(10000, false) == PowerPolicy.Plan.STANDBY);
         policy.remote(10000);
         expect(policy.plan(13999, false) == PowerPolicy.Plan.PREVIEW);
@@ -18,7 +18,7 @@ public final class PowerPolicyTest {
         expect(policy.plan(18999, false) == PowerPolicy.Plan.PREVIEW);
         expect(policy.plan(19000, false) == PowerPolicy.Plan.STANDBY);
         policy.eco = false;
-        expect(policy.fps() == 10 && policy.quality() == 72);
+        expect(policy.fps() == 24 && policy.quality() == 72);
         policy.local(20000);
         expect(policy.plan(21499, false) == PowerPolicy.Plan.PREVIEW);
         expect(policy.plan(21500, false) == PowerPolicy.Plan.STANDBY);

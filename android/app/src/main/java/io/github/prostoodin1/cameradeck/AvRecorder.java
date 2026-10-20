@@ -28,6 +28,12 @@ final class AvRecorder implements AutoCloseable {
     record Sample(boolean audio,byte[] data,long pts,int flags) {}
 
     AvRecorder(File output,int width,int height,int fps,int rotation,boolean sound,AudioEngine source,boolean realtime) throws Exception {
+        this(output,null,width,height,fps,rotation,sound,source,realtime);
+    }
+    AvRecorder(FileDescriptor output,int width,int height,int fps,int rotation,boolean sound,AudioEngine source,boolean realtime) throws Exception {
+        this(null,output,width,height,fps,rotation,sound,source,realtime);
+    }
+    private AvRecorder(File output,FileDescriptor fd,int width,int height,int fps,int rotation,boolean sound,AudioEngine source,boolean realtime) throws Exception {
         withAudio=sound; microphone=source; realtimeTimestamps=realtime;
         MediaCodec v=null,a=null; MediaMuxer m=null; Surface s=null;
         try {
@@ -43,7 +49,7 @@ final class AvRecorder implements AutoCloseable {
                 af.setInteger(MediaFormat.KEY_BIT_RATE,128000); af.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE,8192);
                 a=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC); a.configure(af,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);
             }
-            m=new MediaMuxer(output.getAbsolutePath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4); m.setOrientationHint(rotation);
+            m=fd!=null?new MediaMuxer(fd,MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4):new MediaMuxer(output.getAbsolutePath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4); m.setOrientationHint(rotation);
         } catch(Exception e) {
             if(s!=null)s.release(); if(v!=null)v.release(); if(a!=null)a.release(); if(m!=null)m.release(); throw e;
         }
@@ -53,7 +59,7 @@ final class AvRecorder implements AutoCloseable {
         MediaFormat f=MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC,w,h);
         f.setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         f.setInteger(MediaFormat.KEY_FRAME_RATE,fps);
-        f.setInteger(MediaFormat.KEY_BIT_RATE,(int)Math.min(60_000_000L,Math.max(2_000_000L,(long)w*h*fps/5)));
+        f.setInteger(MediaFormat.KEY_BIT_RATE,(int)Math.min(Integer.MAX_VALUE,Math.max(2_000_000L,(long)w*h*fps/5)));
         f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1); return f;
     }
     Surface getSurface() { return surface; }

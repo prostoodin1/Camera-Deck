@@ -1,35 +1,80 @@
 """Camera Deck's minimal glass theme and viewfinder."""
-from PyQt6.QtCore import Qt,QRectF,QSize
+from PyQt6.QtCore import Qt,QRectF,QSize,QPoint
 from PyQt6.QtGui import QColor,QPainter,QPen,QFont
-from PyQt6.QtWidgets import QLabel,QSizePolicy
+from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider
+import math
+
+
+class SliderField(QWidget):
+    def __init__(self,minimum,maximum,value,decimals=0,logarithmic=False):
+        super().__init__();self.minimum=minimum;self.maximum=max(minimum,maximum);self.decimals=decimals;self.logarithmic=logarithmic
+        layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0);self.label=QLabel();self.label.setStyleSheet("color:#ffd76b;font-size:15px")
+        self.slider=QSlider(Qt.Orientation.Horizontal);self.slider.setRange(0,10000);layout.addWidget(self.label);layout.addWidget(self.slider)
+        if logarithmic and self.maximum>minimum and minimum>0:fraction=math.log(max(minimum,value)/minimum)/math.log(self.maximum/minimum)
+        else:fraction=(value-minimum)/(self.maximum-minimum) if self.maximum>minimum else 0
+        self.slider.setValue(round(10000*min(1,max(0,fraction))));self.slider.valueChanged.connect(self.refresh);self.refresh()
+    def value(self):
+        f=self.slider.value()/10000
+        v=self.minimum*(self.maximum/self.minimum)**f if self.logarithmic and self.minimum>0 else self.minimum+(self.maximum-self.minimum)*f
+        return round(v,self.decimals) if self.decimals else round(v)
+    def refresh(self):self.label.setText(f"{self.value():.{self.decimals}f}")
+
+
+class GlassSheet(QDialog):
+    """A frozen, blurred view of the actual desk behind legible popup controls."""
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Dialog|Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.back=QLabel(self);self.back.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        blur=QGraphicsBlurEffect(self.back);blur.setBlurRadius(28);self.back.setGraphicsEffect(blur)
+        self.back.lower()
+    def showEvent(self,event):
+        parent=self.parentWidget()
+        if parent:
+            pix=parent.grab();origin=parent.mapFromGlobal(self.mapToGlobal(QPoint()))
+            self.back.setPixmap(pix.copy(origin.x(),origin.y(),self.width(),self.height()))
+        self.back.setGeometry(self.rect());self.back.lower();super().showEvent(event)
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QColor(22,22,22,238));p.setPen(QPen(QColor(255,255,255,45),1));p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),22,22);p.end()
+
+
+class Toggle(QCheckBox):
+    def sizeHint(self):return QSize(self.fontMetrics().horizontalAdvance(self.text())+60,30)
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor("#ffd76b" if self.isChecked() else "#424242"));p.drawRoundedRect(QRectF(0,5,36,20),10,10)
+        p.setBrush(QColor("#171717" if self.isChecked() else "#bcbcbc"));p.drawEllipse(QRectF(19 if self.isChecked() else 3,8,14,14))
+        p.setPen(QColor("#e5e5e5" if self.isEnabled() else "#777777"));p.drawText(self.rect().adjusted(46,0,0,0),Qt.AlignmentFlag.AlignVCenter,self.text());p.end()
 
 THEME="""
-QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#0b1019;color:#edf2fa}
-QWidget {font-family:'Segoe UI';font-size:13px;color:#d5deed}
+QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#080808;color:#f4f4f4}
+QWidget {font-family:'Segoe UI';font-size:13px;color:#dddddd}
 QLabel {background:transparent}
-QPushButton {background:#192232;border:1px solid #303e54;border-radius:12px;padding:9px 15px;min-height:16px}
-QPushButton:hover {background:#24344b;border-color:#84b9ff;color:#b2d2ff}
-QPushButton:pressed {background:#8cbdff;color:#0b1019}
+QPushButton {background:#191919;border:1px solid #3c3c3c;border-radius:12px;padding:9px 15px;min-height:16px}
+QPushButton:hover {background:#2b2b2b;border-color:#ffe39b;color:#ffe39b}
+QPushButton:pressed {background:#ffd76b;color:#080808}
 QPushButton:disabled {color:#585858;background:#101010;border-color:#242424}
-QPushButton#primary {background:#8cbdff;color:#101010;border-color:#8cbdff;font-weight:600}
+QPushButton#primary {background:#ffd76b;color:#101010;border-color:#ffd76b;font-weight:600}
 QPushButton#primary:disabled {background:#101010;color:#585858;border-color:#242424}
-QPushButton#readout {color:#8cbdff;background:#121c2b;font-family:'Consolas';font-size:13px;border:1px solid #303e54;padding:7px 8px}
-QPushButton#readout:hover {border-color:#8cbdff;background:#22344c}
-QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#121c2b;color:#8cbdff;border:1px solid #303e54;border-radius:9px;padding:5px 8px;min-height:17px;selection-background-color:#8cbdff;selection-color:#000000}
+QPushButton#readout {border-radius:14px;color:#ffd76b;background:#151515;font-family:'Consolas';font-size:13px;border:1px solid #3c3c3c;padding:7px 8px}
+QPushButton#readout:hover {border-color:#ffd76b;background:#292929}
+QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#151515;color:#ffd76b;border:1px solid #3c3c3c;border-radius:9px;padding:5px 8px;min-height:17px;selection-background-color:#ffd76b;selection-color:#000000}
 QLineEdit#cameraName {color:#f2f2f2;border:0;background:transparent;font-weight:600}
-QComboBox QAbstractItemView {background:#121c2b;color:#eeeeee;selection-background-color:#8cbdff;selection-color:#0b1019}
+QComboBox QAbstractItemView {padding:8px;border:1px solid #424242;border-radius:12px;background:#151515;color:#eeeeee;selection-background-color:#ffd76b;selection-color:#080808}
 QComboBox::drop-down {border:0;width:20px}
-QWidget#tile {background:#111b29;border:1px solid #2b3a50;border-radius:12px}
-QScrollArea {border:0;background:#0b1019}
-QScrollBar:vertical {background:#121c2b;width:8px} QScrollBar::handle:vertical {border-radius:4px;background:#405370;min-height:30px}
+QWidget#tile {background:#111111;border:1px solid #343434;border-radius:12px}
+QScrollArea {border:0;background:#080808}
+QScrollBar:vertical {background:#151515;width:8px} QScrollBar::handle:vertical {border-radius:4px;background:#505050;min-height:30px}
 QCheckBox {spacing:6px;padding:2px;color:#ababab}
-QCheckBox::indicator {width:12px;height:12px;border:1px solid #666666;background:#121c2b}
-QCheckBox::indicator:checked {background:#8cbdff;border-color:#8cbdff}
-QCheckBox:checked {color:#8cbdff} QCheckBox:disabled {color:#555555}
-QTabWidget::pane,QStackedWidget,QWidget#settingsPage {background:#111b29;border:0}
-QTabBar::tab {background:#192232;color:#999999;padding:9px 17px;border-bottom:2px solid #2c2c2c}
-QTabBar::tab:selected {background:#20334e;color:#8cbdff;border-bottom:2px solid #8cbdff}
-QToolTip {background:#202020;color:#8cbdff;border:1px solid #405370}
+QCheckBox::indicator {width:12px;height:12px;border:1px solid #666666;background:#151515}
+QCheckBox::indicator:checked {background:#ffd76b;border-color:#ffd76b}
+QCheckBox:checked {color:#ffd76b} QCheckBox:disabled {color:#555555}
+QTabWidget::pane,QStackedWidget,QWidget#settingsPage {background:#111111;border:0}
+QTabBar::tab {background:#191919;color:#999999;padding:9px 17px;border-bottom:2px solid #2c2c2c}
+QTabBar::tab:selected {background:#29251c;color:#ffd76b;border-bottom:2px solid #ffd76b}
+QToolTip {background:#202020;color:#ffd76b;border:1px solid #505050}
 """
 
 
@@ -77,18 +122,18 @@ class Viewfinder(QLabel):
             painter.drawText(self.rect().adjusted(24,30,-24,-30),Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message)
         s=self.telemetry
         # HUD contains only reported state, never fabricated meters or battery estimates.
-        painter.fillRect(0,0,self.width(),29,QColor(12,20,32,180));painter.fillRect(0,self.height()-30,self.width(),30,QColor(12,20,32,180))
+        painter.fillRect(0,0,self.width(),29,QColor(8,8,8,180));painter.fillRect(0,self.height()-30,self.width(),30,QColor(8,8,8,180))
         painter.setFont(QFont("Segoe UI",10,QFont.Weight.DemiBold))
-        painter.setPen(QColor("#8cbdff"));mode="MOVIE" if s.get("mode")=="video" else "PHOTO"
+        painter.setPen(QColor("#ffd76b"));mode="MOVIE" if s.get("mode")=="video" else "PHOTO"
         painter.drawText(11,19,mode)
         right="● REC" if s.get("recording") else "STBY"
         painter.setPen(QColor("#ff5a52") if s.get("recording") else QColor("#dedede"))
         painter.drawText(self.width()-72,19,right)
-        painter.setPen(QColor("#8cbdff"));painter.drawText(11,self.height()-10,f"ISO {s.get('iso') or '—'}   {shutter_label(s.get('exposureNs',0))}   {'AF' if s.get('focus',-1)<0 else 'MF'}")
+        painter.setPen(QColor("#ffd76b"));painter.drawText(11,self.height()-10,f"ISO {s.get('iso') or '—'}   {shutter_label(s.get('exposureNs',0))}   {'AF' if s.get('focus',-1)<0 else 'MF'}")
         painter.setPen(QColor("#a0a0a0"))
         quality=f"VIEW {s.get('previewFps',5)}p"
         painter.drawText(self.width()-90,self.height()-10,quality)
-        painter.setPen(QPen(QColor("#8cbdff"),1))
+        painter.setPen(QPen(QColor(255,255,255,45),1))
         for x,y,dx,dy in ((12,42,1,1),(self.width()-12,42,-1,1),(12,self.height()-43,1,-1),(self.width()-12,self.height()-43,-1,-1)):
             painter.drawLine(x,y,x+dx*12,y);painter.drawLine(x,y,x,y+dy*12)
         painter.end()

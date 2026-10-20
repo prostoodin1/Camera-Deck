@@ -97,6 +97,34 @@ class CameraClient:
         conn.close()
         return self.fingerprint
 
+    def frames(self, stopped, enabled):
+        """One pinned TLS stream. Only one bounded JPEG is held by this reader."""
+        conn=self.connection()
+        try:
+            conn.sock.settimeout(4)
+            conn.request("GET","/stream",headers={"Authorization":"Bearer "+self.token})
+            response=conn.getresponse()
+            if response.status==404:raise StreamUnavailable("Телефону требуется обновление потокового просмотра")
+            if response.status!=200:raise ConnectionError(f"Просмотр: HTTP {response.status}")
+            if "multipart/x-mixed-replace" not in response.getheader("Content-Type",""):raise ValueError("Неверный формат видеопотока")
+            while not stopped.is_set() and enabled.is_set():
+                line=response.readline(128)
+                if not line:raise ConnectionError("Видеопоток завершён")
+                if line==b"\r\n":continue
+                if line.strip()!=b"--aurora":raise ValueError("Повреждена граница видеопотока")
+                headers={};total=0
+                while True:
+                    line=response.readline(4096);total+=len(line)
+                    if not line or total>16384:raise ValueError("Повреждены заголовки видеопотока")
+                    if line==b"\r\n":break
+                    key,value=line.decode("ascii").split(":",1);headers[key.lower()]=value.strip()
+                size=int(headers.get("content-length","0"))
+                if not 0<size<=2_000_000:raise ValueError("Недопустимый размер видеокадра")
+                frame=response.read(size)
+                if len(frame)!=size:raise ConnectionError("Видеокадр получен не полностью")
+                yield frame,int(headers.get("x-rotation","0"))%360
+        finally:conn.close()
+
     def request(self, path: str, method: str = "GET", body: bytes | None = None,
                 extra: dict | None = None, limit: int = MAX_JSON) -> bytes:
         conn = self.connection()
@@ -178,6 +206,10 @@ class CameraClient:
                     raise ConnectionError(json.loads(data).get("error", f"HTTP {response.status}"))
         finally:
             conn.close()
+
+
+class StreamUnavailable(ConnectionError):
+    pass
 
 
 def connection_message(error: Exception) -> str:

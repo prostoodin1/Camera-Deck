@@ -26,7 +26,34 @@ final class CameraEngine implements AutoCloseable {
     final CameraManager manager;
     final HandlerThread thread = new HandlerThread("CameraDeck-camera");
     final Handler handler;
+    final HandlerThread encoderThread=new HandlerThread("CameraDeck-preview-encoder");
+    final Handler encoderHandler;
     final File mediaDir;
+    final CaptureStore store;
+    CaptureStore.Target recordingTarget;
+    final Object frameReady=new Object();
+    volatile boolean nativePreview;
+    volatile int previewWidth,previewHeight;
+    LocalOutput localOutput;
+    final List<LocalOutput> retiredOutputs=new ArrayList<>();
+    boolean localRejected;
+    static final class LocalOutput {
+        final android.graphics.SurfaceTexture texture;final Surface surface;
+        LocalOutput(android.graphics.SurfaceTexture texture){this.texture=texture;surface=new Surface(texture);}
+        void release(){surface.release();texture.release();}
+    }
+    void attachLocal(android.graphics.SurfaceTexture texture){handler.post(()->{
+        if(closed||localOutput!=null&&localOutput.texture==texture)return;
+        if(localOutput!=null)retiredOutputs.add(localOutput);
+        localOutput=new LocalOutput(texture);localRejected=false;
+        if(preview!=null)texture.setDefaultBufferSize(preview.getWidth(),preview.getHeight());
+        if(ready&&!recording&&!photoPending)try{configure(false);}catch(Exception e){fail(e);}
+    });}
+    void detachLocal(android.graphics.SurfaceTexture texture){handler.post(()->{
+        if(localOutput==null||localOutput.texture!=texture){texture.release();return;}
+        LocalOutput old=localOutput;localOutput=null;nativePreview=false;retiredOutputs.add(old);
+        try{if(ready&&!recording&&!photoPending)configure(false);else if(request!=null&&session!=null){request.removeTarget(old.surface);request.addTarget(preview.getSurface());repeat();}}catch(Exception e){fail(e);}
+    });}
     final AudioEngine audio;
     final java.util.concurrent.ExecutorService photoWriter=java.util.concurrent.Executors.newSingleThreadExecutor();
     volatile String captureMode="photo", photoFormat="jpg";
@@ -41,6 +68,7 @@ final class CameraEngine implements AutoCloseable {
     volatile String powerState = "opening";
     PowerPolicy.Plan appliedPlan;
     int appliedFps;
+    int appliedDemand=-1;
     final Runnable powerTick = new Runnable() {
         public void run() {
             if (closed) return;
@@ -76,8 +104,10 @@ final class CameraEngine implements AutoCloseable {
         context = c; manager = (CameraManager)c.getSystemService(Context.CAMERA_SERVICE);
         mediaDir = new File(c.getExternalFilesDir(null), "captures");
         if (!mediaDir.isDirectory() && !mediaDir.mkdirs()) throw new IOException("Cannot create capture directory");
+        store=new CaptureStore(c,mediaDir);
         thread.start(); handler = new Handler(thread.getLooper());
-        power.eco = c.getSharedPreferences("deck", 0).getBoolean("eco", true);
+        encoderThread.start();encoderHandler=new Handler(encoderThread.getLooper());
+        power.eco = c.getSharedPreferences("deck", 0).getBoolean("eco", false);
         for (String id : manager.getCameraIdList()) {
             Integer facing = manager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING);
             if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) { cameraId = id; break; }
@@ -99,13 +129,16 @@ final class CameraEngine implements AutoCloseable {
     void applyDemand(boolean force) throws Exception {
         if (session == null || request == null || busy || photoPending || closed) return;
         PowerPolicy.Plan plan = power.plan(SystemClock.elapsedRealtime(), recording);
-        int fps = recording ? videoFps : power.fps();
-        if (!force && plan == appliedPlan && fps == appliedFps) return;
+        int fps = recording ? videoFps : (nativePreview?30:power.fps());
+        int demand=(power.localPreview(SystemClock.elapsedRealtime())?1:0)|(power.remotePreview(SystemClock.elapsedRealtime())?2:0);
+        if (!force && plan == appliedPlan && fps == appliedFps && demand==appliedDemand) return;
         if (plan == PowerPolicy.Plan.STANDBY) {
             session.stopRepeating(); frame = new byte[0];
         } else {
             request.removeTarget(preview.getSurface());
-            if (plan == PowerPolicy.Plan.PREVIEW || plan == PowerPolicy.Plan.RECORD_PREVIEW) request.addTarget(preview.getSurface());
+            // Local hardware preview does not need CPU JPEG conversion.
+            if (power.remotePreview(SystemClock.elapsedRealtime()) || !nativePreview || !power.localPreview(SystemClock.elapsedRealtime())) request.addTarget(preview.getSurface());
+            if(nativePreview&&localOutput!=null){request.removeTarget(localOutput.surface);if(power.localPreview(SystemClock.elapsedRealtime()))request.addTarget(localOutput.surface);}
             // The recorder surface remains targeted when only preview is paused.
             Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
             Range<Integer> best = null; int score = Integer.MAX_VALUE;
@@ -117,7 +150,7 @@ final class CameraEngine implements AutoCloseable {
             if (iso > 0 && exposure > 0) request.set(CaptureRequest.SENSOR_FRAME_DURATION, Math.max(1_000_000_000L/fps, exposure));
             repeat();
         }
-        appliedPlan = plan; appliedFps = fps;
+        appliedPlan = plan; appliedFps = fps;appliedDemand=demand;
         powerState = plan.name().toLowerCase(java.util.Locale.US);
     }
 
@@ -154,19 +187,22 @@ final class CameraEngine implements AutoCloseable {
         boolean front = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT;
         rotation = (sensor + (front ? deviceRotation : -deviceRotation) + 360) % 360;
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
-        Size p = choose(map.getOutputSizes(ImageFormat.YUV_420_888), 640, 360);
+        Size p = choose(map.getOutputSizes(ImageFormat.YUV_420_888), 960, 540);
+        previewWidth=p.getWidth();previewHeight=p.getHeight();
+        if(localOutput!=null)localOutput.texture.setDefaultBufferSize(p.getWidth(),p.getHeight());
         preview = ImageReader.newInstance(p.getWidth(), p.getHeight(), ImageFormat.YUV_420_888, 2);
         preview.setOnImageAvailableListener(reader -> {
             try (Image img = reader.acquireLatestImage()) {
-                if (img == null || !power.preview(SystemClock.elapsedRealtime()) || System.nanoTime() - lastPreview < 1_000_000_000L/power.fps()) return;
+                if (img == null || (!power.remotePreview(SystemClock.elapsedRealtime())&&nativePreview) || !power.preview(SystemClock.elapsedRealtime()) || System.nanoTime() - lastPreview < 1_000_000_000L/power.fps()) return;
                 lastPreview = System.nanoTime();
                 byte[] nv21 = nv21(img);
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 new YuvImage(nv21, ImageFormat.NV21, img.getWidth(), img.getHeight(), null)
                     .compressToJpeg(new Rect(0, 0, img.getWidth(), img.getHeight()), power.quality(), out);
                 frame = out.toByteArray(); frameTime = System.currentTimeMillis(); frameSequence++;
+                synchronized(frameReady){frameReady.notifyAll();}
             } catch (Exception e) { fail(e); }
-        }, handler);
+        }, encoderHandler);
         createPhotoReader();
         manager.openCamera(id, new CameraDevice.StateCallback() {
             public void onOpened(CameraDevice device) { if (closed) { device.close(); return; } camera = device; try { configure(false); } catch (Exception e) { fail(e); busy = false; } }
@@ -198,7 +234,7 @@ final class CameraEngine implements AutoCloseable {
         String format=photoFormat; int orientation=rotation; CameraCharacteristics c=characteristics;
         File f=nextFile(format); long requestId=photoRequestId;
         photoWriter.execute(()-> {
-            try(Image image=img) { PhotoWriter.write(image,result,c,f,format,orientation); lastFile=f.getName(); }
+            try(Image image=img) { PhotoWriter.write(image,result,c,f,format,orientation);store.photo(f);lastFile=f.getName(); }
             catch(Exception e) { fail(e); }
             finally { handler.post(()-> { if(photoRequestId==requestId){photoPending=false;photoSaving=false;} }); }
         });
@@ -213,14 +249,19 @@ final class CameraEngine implements AutoCloseable {
         if (session != null) { session.close(); session = null; }
         List<Surface> surfaces = new ArrayList<>(); surfaces.add(preview.getSurface());
         surfaces.add(video ? recorder.getSurface() : photos.getSurface());
+        final LocalOutput output=localRejected?null:localOutput;
+        if(output!=null)surfaces.add(output.surface);
+        nativePreview=false;
         camera.createCaptureSession(surfaces, new CameraCaptureSession.StateCallback() {
             public void onConfigured(CameraCaptureSession s) {
                 if (closed) { s.close(); return; }
                 session = s;
                 try {
+                    nativePreview=output!=null&&output==localOutput;
                     request = camera.createCaptureRequest(video ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW);
                     request.addTarget(preview.getSurface());
                     if (video) request.addTarget(recorder.getSurface());
+                    if(nativePreview)request.addTarget(output.surface);
                     settings(request);
                     // Start recorder before applying demand so the recording target is never removed.
                     if (video) { repeat(); recorder.start(); recording = true; }
@@ -228,7 +269,9 @@ final class CameraEngine implements AutoCloseable {
                 } catch (Exception e) { recording = false; busy = false; fail(e); releaseRecorder(); }
             }
             public void onConfigureFailed(CameraCaptureSession s) {
-                s.close();session=null;request=null;busy=false;ready=false;recording=false;releaseRecorder();
+                s.close();session=null;request=null;busy=false;ready=false;
+                if(output!=null){localRejected=true;nativePreview=false;try{configure(video);}catch(Exception e){fail(e);busy=false;}return;}
+                recording=false;releaseRecorder();
                 error="Unsupported camera stream combination";
                 try {
                     if(video) { error="Video size/FPS + preview combination failed; choose another recording mode";configure(false); }
@@ -243,6 +286,7 @@ final class CameraEngine implements AutoCloseable {
                     }
                 } catch(Exception e) { fail(e);busy=false; }
             }
+            public void onClosed(CameraCaptureSession s){if(output!=null&&retiredOutputs.remove(output))output.release();}
         }, handler);
     }
 
@@ -333,7 +377,8 @@ final class CameraEngine implements AutoCloseable {
                     error="";
                     recordingFile = nextFile("mp4");
                     boolean realtime=characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE)==CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME;
-                    recorder=new AvRecorder(new File(recordingFile.getAbsolutePath()+".partial"),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);
+                    recordingTarget=store.video(recordingFile.getName());
+                    try{recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);}catch(Exception e){recordingTarget.close();recordingTarget=null;throw e;}
                     try { configure(true); } catch (Exception e) { releaseRecorder(); throw e; } break;
                 }
                 case "record_stop": {
@@ -362,6 +407,7 @@ final class CameraEngine implements AutoCloseable {
         o.put("mode",captureMode).put("videoWidth",videoWidth).put("videoHeight",videoHeight).put("videoFps",videoFps)
             .put("photoWidth",photoWidth).put("photoHeight",photoHeight).put("photoFormat",photoFormat).put("captureCapabilities",capabilities);
         o.put("powerState", powerState).put("eco", power.eco).put("previewFps", power.fps());
+        o.put("nativePreview",nativePreview).put("storageName",store.label()).put("storageFreeBytes",store.freeBytes()).put("phoneFreeBytes",mediaDir.getUsableSpace()).put("externalStorage",store.tree()!=null);
         JSONArray cameras = new JSONArray();
         for (String id : manager.getCameraIdList()) {
             CameraCharacteristics c = manager.getCameraCharacteristics(id);
@@ -380,13 +426,15 @@ final class CameraEngine implements AutoCloseable {
     }
 
     static byte[] nv21(Image img) {
-        int w = img.getWidth(), h = img.getHeight(); byte[] result = new byte[w*h*3/2];
-        Image.Plane[] planes = img.getPlanes();
-        for (int p = 0; p < 3; p++) {
-            ByteBuffer buf = planes[p].getBuffer(); int rows = p == 0 ? h : h/2, cols = p == 0 ? w : w/2;
-            for (int y = 0; y < rows; y++) for (int x = 0; x < cols; x++) {
-                int dst = p == 0 ? y*w+x : w*h + y*w + x*2 + (p == 2 ? 0 : 1);
-                result[dst] = buf.get(buf.position() + y*planes[p].getRowStride() + x*planes[p].getPixelStride());
+        int w=img.getWidth(),h=img.getHeight();byte[] result=new byte[w*h*3/2];
+        Image.Plane[] planes=img.getPlanes();
+        for(int p=0;p<3;p++){
+            ByteBuffer buffer=planes[p].getBuffer();int start=buffer.position(),rows=p==0?h:h/2,cols=p==0?w:w/2,stride=planes[p].getPixelStride();
+            byte[] row=new byte[(cols-1)*stride+1];
+            for(int y=0;y<rows;y++){
+                buffer.position(start+y*planes[p].getRowStride());buffer.get(row);
+                if(p==0&&stride==1){System.arraycopy(row,0,result,y*w,w);continue;}
+                for(int x=0;x<cols;x++)result[p==0?y*w+x:w*h+y*w+x*2+(p==2?0:1)]=row[x*stride];
             }
         }
         return result;
@@ -398,12 +446,10 @@ final class CameraEngine implements AutoCloseable {
         try { recorder.stop(); } catch(Exception e) { failure=e.getMessage(); }
         recorder.close(); if(failure.isEmpty())failure=recorder.error;
         recording=false;recorder=null;
-        File partial=new File(recordingFile.getAbsolutePath()+".partial");
-        if(failure.isEmpty() && partial.renameTo(recordingFile))lastFile=recordingFile.getName();
-        else error="Recording not finalized; partial file retained: "+failure;
+        try{if(failure.isEmpty()&&recordingTarget!=null){recordingTarget.finish();lastFile=recordingFile.getName();}else{if(recordingTarget!=null)recordingTarget.close();error="Recording not finalized; partial file retained: "+failure;}}catch(Exception e){fail(e);}finally{recordingTarget=null;}
         configure(false);
     }
-    void releaseRecorder() { if (recorder != null) { try { recorder.close(); } catch (Exception ignored) {} recorder = null; } }
+    void releaseRecorder() { if (recorder != null) { try { recorder.close(); } catch (Exception ignored) {} recorder = null; }if(recordingTarget!=null){try{recordingTarget.close();}catch(Exception ignored){}recordingTarget=null;} }
     void closeCamera() {
         ready = false; appliedPlan = null; request = null; powerState = "opening";
         if (session != null) { session.close(); session = null; }
@@ -416,12 +462,12 @@ final class CameraEngine implements AutoCloseable {
         FutureTask<Void> task = new FutureTask<>(() -> {
             closed = true;
             if (recording) {
-                try { recorder.stop(); recorder.close(); if(recorder.error.isEmpty())new File(recordingFile.getAbsolutePath()+".partial").renameTo(recordingFile); } catch (Exception ignored) {}
+                try { recorder.stop(); recorder.close(); if(recorder.error.isEmpty()&&recordingTarget!=null)recordingTarget.finish(); } catch (Exception ignored) {}
             }
             recording = false; releaseRecorder(); closeCamera(); return null;
         });
         handler.post(task); try { task.get(5, TimeUnit.SECONDS); } catch (Exception ignored) {}
-        thread.quitSafely();
+        thread.quitSafely();encoderThread.quitSafely();
         photoWriter.shutdown();
     }
 }

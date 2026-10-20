@@ -26,6 +26,7 @@ public class CameraService extends Service {
     PowerManager.WakeLock wake;
     final Handler maintenance = new Handler(Looper.getMainLooper());
     final java.util.concurrent.atomic.AtomicInteger transfers = new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicInteger viewers=new java.util.concurrent.atomic.AtomicInteger();
     long wakeRenewed;
     String notifiedState = "";
     final Runnable powerTick = new Runnable() {
@@ -174,6 +175,31 @@ public class CameraService extends Service {
                 Long expires = auth.startsWith("Bearer ") ? tokens.get(auth.substring(7)) : null;
                 if (expires == null || expires < System.currentTimeMillis()) return error(Response.Status.UNAUTHORIZED, "Pair again on phone");
                 if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("previewBuild", BuildConfig.PREVIEW_BUILD));
+                if(s.getMethod()==Method.GET&&uri.equals("/stream")){
+                    if(viewers.incrementAndGet()>2){viewers.decrementAndGet();return error(Response.Status.SERVICE_UNAVAILABLE,"Слишком много просмотров");}
+                    final String token=auth.substring(7);final CameraEngine camera=engine;
+                    InputStream stream=new InputStream(){
+                        byte[] part=new byte[0];int offset;long sequence=-1;boolean ended;
+                        public int read()throws IOException{byte[] b=new byte[1];return read(b,0,1)<0?-1:b[0]&255;}
+                        public int read(byte[] b,int off,int len)throws IOException{
+                            if(len==0)return 0;
+                            while(offset==part.length){
+                                Long expiry=tokens.get(token);if(ended||!running||camera.closed||expiry==null||expiry<System.currentTimeMillis()){close();return -1;}
+                                camera.demandRemote();
+                                byte[] jpeg;
+                                synchronized(camera.frameReady){
+                                    if(camera.frameSequence==sequence||camera.frame.length==0){try{camera.frameReady.wait(500);}catch(InterruptedException e){Thread.currentThread().interrupt();close();return -1;}continue;}
+                                    sequence=camera.frameSequence;jpeg=camera.frame;
+                                }
+                                byte[] header=("--aurora\r\nContent-Type: image/jpeg\r\nContent-Length: "+jpeg.length+"\r\nX-Rotation: "+camera.rotation+"\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+                                part=new byte[header.length+jpeg.length+2];System.arraycopy(header,0,part,0,header.length);System.arraycopy(jpeg,0,part,header.length,jpeg.length);part[part.length-2]=13;part[part.length-1]=10;offset=0;
+                            }
+                            int n=Math.min(len,part.length-offset);System.arraycopy(part,offset,b,off,n);offset+=n;return n;
+                        }
+                        public void close(){if(!ended){ended=true;viewers.decrementAndGet();updatePower();}}
+                    };
+                    Response response=newChunkedResponse(Response.Status.OK,"multipart/x-mixed-replace; boundary=aurora",stream);response.addHeader("Cache-Control","no-store");return response;
+                }
                 if (s.getMethod() == Method.GET && uri.equals("/frame")) {
                     engine.demandRemote(); updatePower();
                     byte[] bytes = engine.frame;
@@ -198,20 +224,13 @@ public class CameraService extends Service {
                 }
                 if (s.getMethod() == Method.POST && uri.equals("/command")) return json(Response.Status.OK, engine.command(body(s)));
                 if (s.getMethod() == Method.GET && uri.equals("/media")) {
-                    JSONArray files = new JSONArray(); File[] list = engine.mediaDir.listFiles();
-                    if (list != null) { Arrays.sort(list, Comparator.comparingLong(File::lastModified).reversed()); for (File f : list) {
-                        if (!f.getName().matches("CD_[0-9]+_[a-f0-9]{8}\\.(jpg|png|webp|dng|mp4)")) continue;
-                        if (engine.recordingFile != null && (engine.recording || engine.busy) && f.equals(engine.recordingFile)) continue;
-                        files.put(new JSONObject().put("name", f.getName()).put("size", f.length())); if (files.length() >= 100) break;
-                    } }
-                    return json(Response.Status.OK, new JSONObject().put("files", files));
+                    return json(Response.Status.OK, new JSONObject().put("files", engine.store.files()));
                 }
                 if (s.getMethod() == Method.GET && uri.equals("/file")) {
                     String filename = s.getParms().getOrDefault("name", "");
                     if (!filename.matches("CD_[0-9]+_[a-f0-9]{8}\\.(jpg|png|webp|dng|mp4)")) return error(Response.Status.BAD_REQUEST, "Invalid filename");
-                    File f = new File(engine.mediaDir, filename);
-                    if (!f.isFile() || (f.equals(engine.recordingFile) && (engine.recording || engine.busy))) return error(Response.Status.NOT_FOUND, "File unavailable");
-                    FileInputStream source = new FileInputStream(f) {
+                    long size=engine.store.size(filename);
+                    InputStream source = new FilterInputStream(engine.store.open(filename)) {
                         boolean ended;
                         @Override public void close() throws IOException {
                             try { super.close(); } finally { if (!ended) { ended = true; transfers.decrementAndGet(); updatePower(); } }
@@ -219,7 +238,7 @@ public class CameraService extends Service {
                     };
                     transfers.incrementAndGet(); updatePower();
                     String mime=filename.endsWith("jpg")?"image/jpeg":filename.endsWith("png")?"image/png":filename.endsWith("webp")?"image/webp":filename.endsWith("dng")?"image/x-adobe-dng":"video/mp4";
-                    return newFixedLengthResponse(Response.Status.OK,mime, source, f.length());
+                    return newFixedLengthResponse(Response.Status.OK,mime, source, size);
                 }
                 if (s.getMethod() == Method.PUT && uri.equals("/update")) {
                     if(BuildConfig.PREVIEW_BUILD)return error(Response.Status.CONFLICT,"Preview устанавливается отдельно. Обновления основного приложения сюда не устанавливаются.");
