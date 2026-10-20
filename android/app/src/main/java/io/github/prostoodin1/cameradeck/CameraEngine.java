@@ -96,6 +96,15 @@ final class CameraEngine implements AutoCloseable {
     volatile ImageReader preview;
     ImageReader photos;
     AvRecorder recorder;
+    volatile RecordingRelay recordingRelay;
+    RecordingRelay subscribeRecording()throws Exception{
+        FutureTask<RecordingRelay> task=new FutureTask<>(()->{
+            if(android.os.Build.VERSION.SDK_INT<29)throw new IllegalStateException("Для прямой записи требуется Android 10+ с отключением B-кадров");
+            if(!ready||busy||recording||!captureMode.equals("video"))throw new IllegalStateException("Выберите Видео и дождитесь готовности камеры");
+            if(recordingRelay!=null&&!recordingRelay.closed&&!recordingRelay.ended)throw new IllegalStateException("Запись на ПК уже подключена");
+            recordingRelay=new RecordingRelay();return recordingRelay;
+        });handler.post(task);return task.get(10,TimeUnit.SECONDS);
+    }
     volatile LiveVideo live;
     volatile int liveUsers;
     volatile String liveError="";
@@ -121,6 +130,7 @@ final class CameraEngine implements AutoCloseable {
                 recordingFile=nextFile("mp4");recordingTarget=store.video(recordingFile.getName());
                 boolean realtime=Integer.valueOf(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME).equals(characteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE));
                 recorder=new AvRecorder(recordingTarget.fd(),videoWidth,videoHeight,videoFps,rotation,sound,audio,realtime);
+                if(recordingRelay!=null&&!recordingRelay.closed&&!recordingRelay.ended)recorder.relay=recordingRelay;
                 configure(true);
             }catch(Exception e){fail(e);releaseRecorder();try{configure(false);}catch(Exception restore){fail(restore);busy=false;}}
         };
@@ -151,7 +161,7 @@ final class CameraEngine implements AutoCloseable {
     void unsubscribeVideo(LiveVideo source){handler.post(()->{if(source!=live)return;liveUsers=Math.max(0,liveUsers-1);try{applyDemand(true);}catch(Exception e){fail(e);}});}
 
     CaptureRequest.Builder request;
-    long lastPreview;
+    final PreviewCadence previewCadence=new PreviewCadence();
     int iso;
     long exposure;
     float focus = -1;
@@ -299,8 +309,7 @@ final class CameraEngine implements AutoCloseable {
         preview.setOnImageAvailableListener(reader -> {
             if(closed||reader!=preview)return;
             try (Image img = reader.acquireLatestImage()) {
-                if (img == null || (!trackingNeeded()&&!power.remotePreview(SystemClock.elapsedRealtime())&&nativePreview) || !power.preview(SystemClock.elapsedRealtime()) || System.nanoTime() - lastPreview < 1_000_000_000L/power.fps()) return;
-                lastPreview = System.nanoTime();
+                if (img == null || (!trackingNeeded()&&!power.remotePreview(SystemClock.elapsedRealtime())&&nativePreview) || !power.preview(SystemClock.elapsedRealtime()) || !previewCadence.allow(System.nanoTime(),power.fps())) return;
                 boolean detection=trackingNeeded()&&tracker.wants();
                 boolean jpeg=liveUsers==0&&power.remotePreview(SystemClock.elapsedRealtime());
                 boolean local=!nativePreview&&localDisplay!=null&&power.localPreview(SystemClock.elapsedRealtime());
@@ -563,7 +572,7 @@ final class CameraEngine implements AutoCloseable {
             .put("recordingElapsedMs",recording?SystemClock.elapsedRealtime()-recordingStartedMs:0).put("localDisplayFps",localDisplayFps).put("localConversionMs",localConversionMs).put("localHandoffMs",localHandoffMs)
             .put("cameraId", cameraId).put("rotation", rotation).put("frameTime", frameTime).put("frameSequence", frameSequence)
             .put("iso", measuredIso).put("exposureNs", measuredExposure).put("manualIso", iso).put("manualExposureNs", exposure).put("focus", focus)
-            .put("lastFile", lastFile).put("audio", sound).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility");
+            .put("lastFile", lastFile).put("audio", sound).put("audioRecordingActive",recording&&recorder!=null&&recorder.audioTrack>=0&&recorder.muxing).put("micCapturing",audio.capturing).put("micLevelDb",audio.capturing?audio.levelDb:JSONObject.NULL).put("thermalStatus",android.os.Build.VERSION.SDK_INT>=29?context.getSystemService(android.os.PowerManager.class).getCurrentThermalStatus():-1).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility").put("originalRecording",android.os.Build.VERSION.SDK_INT>=29).put("remoteRecordingError",recordingRelay==null?"":recordingRelay.error);
         o.put("zoom",zoom).put("zoomMin",minZoom).put("zoomMax",maxZoom).put("autoZoom",autoZoom).put("framing",framing).put("tracking",tracking).put("faceFocus",faceFocus).put("faces",SystemClock.elapsedRealtime()-facesAt<800?faces:new JSONArray()).put("afState",afState).put("trackingError",trackingError).put("streamProfile",liveProfile);
         if(focusPoint!=null)o.put("focusPoint",new JSONArray().put(focusPoint[0]).put(focusPoint[1]));
         o.put("mode",captureMode).put("videoWidth",videoWidth).put("videoHeight",videoHeight).put("videoFps",videoFps)
@@ -602,16 +611,17 @@ final class CameraEngine implements AutoCloseable {
         return result;
     }
     File nextFile(String ext) { return new File(mediaDir, "CD_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0,8) + "." + ext); }
-    void fail(Exception e) { error = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()); }
+    void fail(Exception e) { android.util.Log.w("CameraDeck",e.getClass().getSimpleName()+": "+e.getMessage(),e);error = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()); }
     void finishRecording() throws Exception {
         String failure="";
         try { recorder.stop(); } catch(Exception e) { failure=e.getMessage(); }
         recorder.close(); if(failure.isEmpty())failure=recorder.error;
         recording=false;recorder=null;
         try{if(failure.isEmpty()&&recordingTarget!=null){recordingTarget.finish();lastFile=recordingFile.getName();}else{if(recordingTarget!=null)recordingTarget.close();error="Recording not finalized; partial file retained: "+failure;}}catch(Exception e){fail(e);}finally{recordingTarget=null;}
+        if(recordingRelay!=null)recordingRelay.finish(error);
         configure(false);
     }
-    void releaseRecorder() { if (recorder != null) { try { recorder.close(); } catch (Exception ignored) {} recorder = null; }if(recordingTarget!=null){try{recordingTarget.close();}catch(Exception ignored){}recordingTarget=null;} }
+    void releaseRecorder() { if(recordingRelay!=null)recordingRelay.finish(error.isEmpty()?"Запись не была завершена":error);if (recorder != null) { try { recorder.close(); } catch (Exception ignored) {} recorder = null; }if(recordingTarget!=null){try{recordingTarget.close();}catch(Exception ignored){}recordingTarget=null;} }
     void closeCamera() {
         configuration++;ready = false; appliedPlan = null; request = null; powerState = "opening";
         if (session != null) { session.close(); session = null; }

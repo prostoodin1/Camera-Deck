@@ -18,6 +18,7 @@ final class AudioEngine implements AutoCloseable {
     volatile AvRecorder recording;
     volatile boolean running = true, capturing;
     volatile String error = "";
+    volatile double levelDb=-96;
     final Thread worker;
     AudioRecord mic;
     long framesRead;
@@ -48,6 +49,8 @@ final class AudioEngine implements AutoCloseable {
                     offset+=n;
                 }
                 if(offset!=pcm.length) continue;
+                double energy=0;for(int i=0;i<pcm.length;i+=2){short sample=(short)((pcm[i]&255)|(pcm[i+1]<<8));energy+=(double)sample*sample;}
+                levelDb=Math.max(-96,20*Math.log10(Math.max(1e-8,Math.sqrt(energy/(pcm.length/2))/32768.0)));
                 long now=SystemClock.elapsedRealtimeNanos();
                 framesRead+=pcm.length/2;
                 AudioTimestamp timestamp=new AudioTimestamp();

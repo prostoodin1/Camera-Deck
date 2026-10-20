@@ -29,9 +29,11 @@ final class LocalPreview implements AutoCloseable {
         if(frame==null||closed||!active){complete();return;}
         long start=SystemClock.elapsedRealtimeNanos();
         try{
-            if(colors.length!=frame.width*frame.height)colors=new int[frame.width*frame.height];
-            Nv21.argb(frame.pixels,frame.width,frame.height,colors);
-            Bitmap bitmap=Bitmap.createBitmap(colors,frame.width,frame.height,Bitmap.Config.ARGB_8888);
+            int step=1;while(frame.width/step>640||frame.height/step>480)step*=2;
+            int width=frame.width/step,height=frame.height/step;
+            if(colors.length!=width*height)colors=new int[width*height];
+            Nv21.argb(frame.pixels,frame.width,frame.height,colors,step);
+            Bitmap bitmap=Bitmap.createBitmap(colors,width,height,Bitmap.Config.ARGB_8888);
             double ms=(SystemClock.elapsedRealtimeNanos()-start)/1e6;
             ui.post(()->{try{if(!closed&&active&&generation==epoch)display.show(bitmap,frame.rotation,ms,frame.received);}finally{complete();}});
         }catch(RuntimeException|OutOfMemoryError error){complete();}

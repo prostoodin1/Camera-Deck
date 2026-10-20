@@ -58,13 +58,14 @@ class CameraTile(QWidget):
         self.name = QLineEdit(name)
         self.name.setObjectName("cameraName")
         self.name.setToolTip("Название окна на этом компьютере")
-        self.group = QLineEdit("Общая")
+        self.group = QLineEdit(window.load_preferences().get("cameraGroups",{}).get(self.rotation_identity,"Общая"))
         self.group.setMaximumWidth(115)
         self.group.setPlaceholderText("Группа")
         self.group.editingFinished.connect(window.rebuild)
         remove = QPushButton("Откл.");remove.setToolTip("Отключить эту камеру от пульта")
         remove.clicked.connect(lambda: window.remove(self))
-        full=QPushButton("На весь экран");full.setToolTip("Открыть камеру во весь экран");full.clicked.connect(self.open_fullscreen);heading.addWidget(full)
+        from icons import icon
+        full=QPushButton();full.setIcon(icon("expand"));full.setToolTip("Открыть камеру во весь экран");full.clicked.connect(self.open_fullscreen);heading.addWidget(full)
         heading.addWidget(self.name, 2); heading.addWidget(self.group, 1); heading.addWidget(remove)
         box.addLayout(heading)
         self.video = Viewfinder()
@@ -114,7 +115,7 @@ class CameraTile(QWidget):
         self.feed.image.connect(self.show_frame)
         self.feed.state.connect(self.show_status)
         self.feed.failure.connect(self.show_error)
-        self.feed.preview_failure.connect(lambda message:self.video.setText("Предпросмотр: "+message))
+        self.feed.preview_failure.connect(self.show_preview_error)
         self.worker = threading.Thread(target=self.poll, daemon=True, name="camera-preview")
         self.worker.start()
         self.display_timer=QTimer(self);self.display_timer.timeout.connect(self.display_latest);self.display_timer.start(16)
@@ -189,10 +190,11 @@ class CameraTile(QWidget):
         dialog=QDialog(self.window);dialog.setWindowTitle(self.name.text());dialog.setStyleSheet(THEME)
         layout=QVBoxLayout(dialog);bar=QHBoxLayout();bar.addWidget(QLabel(self.name.text()));bar.addStretch();self.full_rotation_lock=self.rotation_controls(bar);close=QPushButton("Выйти из полного экрана · Esc");close.clicked.connect(dialog.close);bar.addWidget(close);layout.addLayout(bar)
         view=Viewfinder();view.on_focus=self.video.on_focus;layout.addWidget(view,1);view.set_status(self.status)
+        view.set_tools(self.video.tool,self.video.grid_lines,self.video.safe_area)
         view.frame_rotation=self.video.frame_rotation
         if self.video.frame is not None:view.set_frame(self.video.frame)
         self.fullscreen=dialog;self.full_view=view
-        def finished():self.fullscreen=None;self.full_view=None;self.full_rotation_lock=None;dialog.deleteLater();self.window.rebuild()
+        def finished():view.analyzer.close();self.fullscreen=None;self.full_view=None;self.full_rotation_lock=None;dialog.deleteLater();self.window.rebuild()
         dialog.finished.connect(finished);dialog.showFullScreen();self.set_preview_active(True)
 
     def display_latest(self):
@@ -258,9 +260,14 @@ class CameraTile(QWidget):
                 self.feed.failure.emit(str(exc))
             self.stopped.wait(1 if self.preview_enabled.is_set() else 3)
 
+    def show_preview_error(self,message):
+        from errors import explain
+        self.video.setText(explain(message)[0]+'\nПредпросмотр недоступен. Проверьте состояние записи на телефоне.');self.video.setToolTip(message)
+
     def show_error(self, message):
+        from errors import explain
         self.failures += 1
-        self.info.setText("Связь / камера: " + message + ". При истечении сеанса подключитесь заново.")
+        self.info.setText(explain(message)[0]+" Проверьте состояние записи на телефоне.");self.info.setToolTip(message)
         self.video.setText("Нет актуального изображения")
         self.photo.setEnabled(False); self.record.setEnabled(False)
 
@@ -273,6 +280,7 @@ class CameraTile(QWidget):
         self.display_latest()
 
     def show_status(self, status):
+        if self.status.get("recording") and not status.get("recording"):self.client.force_avc=True
         self.status = status
         if hasattr(self,'quick_record'):
             self.quick_record.setText('■ Стоп' if status.get('recording') else '● Запись')
@@ -504,7 +512,7 @@ class Window(QMainWindow):
 
     def save_preferences(self):
         updates.DATA.mkdir(parents=True,exist_ok=True)
-        (updates.DATA/"preferences.json").write_text(json.dumps({"autoUpdates":self.auto.isChecked(),"geometry":bytes(self.saveGeometry().toBase64()).decode(),"columns":self.columns.currentIndex()}))
+        (updates.DATA/"preferences.json").write_text(json.dumps({"autoUpdates":self.auto.isChecked(),"geometry":bytes(self.saveGeometry().toBase64()).decode(),"columns":self.columns.currentIndex(),"selectedCamera":self.studio.saved_selection,"cameraGroups":{**self.load_preferences().get("cameraGroups",{}),**{t.rotation_identity:t.group.text() for t in self.tiles}}}))
 
     def run(self, function, callback=lambda _: None, failure=None):
         signal = Result(); self.jobs.append(signal)
@@ -632,7 +640,7 @@ class Window(QMainWindow):
 
     def remove(self,tile):
         if tile.fullscreen is not None:tile.fullscreen.close()
-        tile.stopped.set();tile.monitor.stop(); self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
+        tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close(); self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
         # Keep QObject alive until its networking thread has observed the stop event.
         QTimer.singleShot(10000,tile.deleteLater)
 
@@ -671,7 +679,7 @@ class Window(QMainWindow):
         self.update_label.setText("Готово обновление " + result["version"]+" · установится при закрытии пульта")
         self.install_button.setEnabled(True)
 
-    def is_recording(self): return any(not tile.status or tile.status.get("recording") or tile.failures for tile in self.tiles)
+    def is_recording(self): return any(j.get("state") in ("starting","recording") for j in self.studio.pc_jobs.values()) or any(not tile.status or tile.status.get("recording") or tile.failures for tile in self.tiles)
 
     def install_windows(self):
         if self.is_recording(): self.message("Обновление","Остановите запись и восстановите связь со всеми камерами перед перезапуском."); return
@@ -706,7 +714,7 @@ class Window(QMainWindow):
             except Exception as exc:self.message("Обновление",str(exc))
         self.save_preferences()
         if hasattr(self,"studio"):self.studio.media.player.stop()
-        for tile in self.tiles: tile.stopped.set();tile.monitor.stop()
+        for tile in self.tiles: tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close()
         event.accept()
 
     def changeEvent(self,event):

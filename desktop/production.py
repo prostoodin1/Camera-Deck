@@ -3,6 +3,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 
+def estimate_clock(client,samples=5,now=time.monotonic_ns):
+    estimates=[]
+    for _ in range(samples):
+        before=now();remote=client.json('/clock').get('monotonicNs');after=now()
+        if type(remote) is not int or remote<=0 or after<before:raise ValueError('Телефон не сообщает монотонное время')
+        estimates.append({'offsetNs':remote-(before+after)//2,'uncertaintyNs':(after-before)//2,'roundTripNs':after-before})
+    return min(estimates,key=lambda item:item['roundTripNs'])
+
+
 def operate(cameras, recording, emit, timeout=12):
     def one(identity, client):
         started=time.monotonic()

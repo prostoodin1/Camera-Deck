@@ -17,6 +17,8 @@ final class CameraDesign {
         states.addState(new int[]{},surface(b.getContext(),primary?ACCENT:PANEL,primary?0:LINE,8));
         b.setBackground(states);b.setAlpha(b.isEnabled()?1:.38f);
     }
+    // This application deliberately uses platform Activity/widgets, not AppCompat.
+    @android.annotation.SuppressLint("AppCompatCustomView")
     static final class Shutter extends Button {
         final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
         boolean recording,photo=true;

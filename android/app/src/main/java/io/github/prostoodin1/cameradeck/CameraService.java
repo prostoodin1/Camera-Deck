@@ -198,6 +198,17 @@ public class CameraService extends Service {
                 if(uri.equals("/trusted")&&s.getMethod()==Method.GET)return json(Response.Status.OK,new JSONObject().put("clients",trusted.list()));
                 if(uri.equals("/forget")&&s.getMethod()==Method.POST){String owner=owners.get(auth.substring(7));if(owner!=null)forgetClient(owner);return json(Response.Status.OK,new JSONObject().put("accepted",true));}
                 if (s.getMethod() == Method.GET && uri.equals("/status")) return json(Response.Status.OK, engine.status().put("name", name()).put("version", BuildConfig.VERSION_NAME).put("versionCode", BuildConfig.VERSION_CODE).put("previewBuild", BuildConfig.PREVIEW_BUILD).put("auroraUpdates",BuildConfig.PREVIEW_BUILD));
+                if(s.getMethod()==Method.GET&&uri.equals("/clock"))return json(Response.Status.OK,new JSONObject().put("monotonicNs",SystemClock.elapsedRealtimeNanos()));
+                if(s.getMethod()==Method.GET&&uri.equals("/recording")){
+                    RecordingRelay relay=engine.subscribeRecording();String ownerToken=auth.substring(7);
+                    InputStream stream=new FilterInputStream(relay){
+                        @Override public int read(byte[] b,int off,int len)throws IOException{
+                            Long expiry=tokens.get(ownerToken);if(expiry==null||expiry<System.currentTimeMillis()||!running){close();return -1;}return super.read(b,off,len);
+                        }
+                        @Override public void close()throws IOException{super.close();}
+                    };
+                    Response response=newChunkedResponse(Response.Status.OK,"application/x-cameradeck-recording",stream);response.addHeader("Cache-Control","no-store");return response;
+                }
                 if(s.getMethod()==Method.GET&&uri.equals("/video")){
                     if(viewers.incrementAndGet()>2){viewers.decrementAndGet();return error(Response.Status.SERVICE_UNAVAILABLE,"Слишком много просмотров");}
                     final LiveVideo video;try{video=engine.subscribeVideo();}catch(Exception e){viewers.decrementAndGet();return error(Response.Status.NOT_IMPLEMENTED,"H.264 недоступен: "+e.getMessage());}

@@ -1,6 +1,21 @@
 """Human-readable consequences and recovery, with expandable diagnostic details."""
 from PyQt6.QtWidgets import QDialog,QVBoxLayout,QLabel,QPushButton,QPlainTextEdit,QDialogButtonBox
 from appearance import GlassSheet
+import logging
+from logging.handlers import RotatingFileHandler
+import re
+
+
+def log_issue(message):
+    import updates
+    logger=logging.getLogger('camera-deck')
+    if not logger.handlers:
+        folder=updates.DATA/'logs';folder.mkdir(parents=True,exist_ok=True)
+        handler=RotatingFileHandler(folder/'desktop.log',maxBytes=1_000_000,backupCount=3,encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'));logger.addHandler(handler);logger.setLevel(logging.WARNING)
+    safe=re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._-]+',r'\1[redacted]',str(message))
+    safe=re.sub(r'\b[0-9a-fA-F]{64}\b','[identity redacted]',safe)
+    logger.warning(safe)
 
 
 def explain(message):
@@ -19,6 +34,8 @@ def explain(message):
 def show_message(parent,title,message):
     dialog=GlassSheet(parent);dialog.setWindowTitle(title);dialog.setMinimumWidth(480);layout=QVBoxLayout(dialog);layout.setContentsMargins(24,24,24,24)
     if title in ('Не выполнено','Ошибка','Группа камер'):
+        try:log_issue(message)
+        except OSError:pass
         summary,impact,action=explain(str(message))
         for text in (summary,impact,action):label=QLabel(text);label.setWordWrap(True);layout.addWidget(label)
         details=QPlainTextEdit(str(message));details.setReadOnly(True);details.setMaximumHeight(170);details.hide()

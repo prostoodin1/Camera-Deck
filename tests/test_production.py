@@ -34,3 +34,13 @@ def test_stop_only_sends_command_to_active_camera():
     operate([(1,active),(2,idle)],False,result.append)
     assert active.calls==['record_stop'] and not idle.calls
     assert all(r[1] and not r[3]['recording'] for r in result)
+
+
+def test_clock_estimate_uses_lowest_round_trip_and_reports_uncertainty():
+    from production import estimate_clock
+    class Clock:
+        def __init__(self):self.values=iter([1000100,1000300])
+        def json(self,path):assert path=='/clock';return {'monotonicNs':next(self.values)}
+    host=iter([0,200,290,310])
+    estimate=estimate_clock(Clock(),samples=2,now=lambda:next(host))
+    assert estimate=={'offsetNs':1000000,'uncertaintyNs':10,'roundTripNs':20}

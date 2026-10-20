@@ -11,6 +11,8 @@ import java.util.concurrent.*;
 /** Surface H.264 + shared-microphone AAC with a single monotonic timestamp origin. */
 final class AvRecorder implements AutoCloseable {
     final MediaCodec video, audio;
+    final int width,height,fps,rotation;
+    RecordingRelay relay;MediaFormat videoFormat,audioFormat;
     final MediaMuxer muxer;
     final Surface surface;
     final AudioEngine microphone;
@@ -22,8 +24,8 @@ final class AvRecorder implements AutoCloseable {
     volatile String error="";
     volatile long originNs;
     Thread videoThread,audioThread;
-    int videoTrack=-1,audioTrack=-1,pendingBytes;
-    boolean muxing;
+    volatile int videoTrack=-1,audioTrack=-1;int pendingBytes;
+    volatile boolean muxing;
     record AudioPacket(byte[] data,long timeNs) {}
     record Sample(boolean audio,byte[] data,long pts,int flags) {}
 
@@ -34,6 +36,7 @@ final class AvRecorder implements AutoCloseable {
         this(null,output,width,height,fps,rotation,sound,source,realtime);
     }
     private AvRecorder(File output,FileDescriptor fd,int width,int height,int fps,int rotation,boolean sound,AudioEngine source,boolean realtime) throws Exception {
+        this.width=width;this.height=height;this.fps=fps;this.rotation=rotation;
         withAudio=sound; microphone=source; realtimeTimestamps=realtime;
         MediaCodec v=null,a=null; MediaMuxer m=null; Surface s=null;
         try {
@@ -71,7 +74,7 @@ final class AvRecorder implements AutoCloseable {
                     MediaCodecInfo.CodecCapabilities caps=info.getCapabilitiesForType(mime);MediaCodecInfo.VideoCapabilities video=caps.getVideoCapabilities();
                     if(video==null||!video.areSizeAndRateSupported(w,h,fps))continue;
                     android.util.Range<Integer> range=video.getBitrateRange();MediaFormat format=basicFormat(mime,w,h,fps,Math.max(range.getLower(),Math.min(target,range.getUpper())));
-                    if(caps.isFormatSupported(format))return format;
+                    if(caps.isFormatSupported(format)){if(android.os.Build.VERSION.SDK_INT>=29)format.setInteger(MediaFormat.KEY_MAX_B_FRAMES,0);return format;}
                 }catch(IllegalArgumentException ignored){}
             }
         }
@@ -106,7 +109,9 @@ final class AvRecorder implements AutoCloseable {
                             ByteBuffer buf=video.getOutputBuffer(index); buf.position(info.offset); buf.limit(info.offset+info.size);
                             if(offsetUs==Long.MIN_VALUE) offsetUs=realtimeTimestamps?originNs/1000:
                                 info.presentationTimeUs-(SystemClock.elapsedRealtimeNanos()-originNs)/1000;
-                            long pts=Math.max(lastPts+1,info.presentationTimeUs-offsetUs); lastPts=pts;
+                            long rawPts=info.presentationTimeUs-offsetUs;
+                            if(relay!=null&&rawPts<=lastPts)relay.finish("Кодер выдал переставленные кадры; прямая запись остановлена. Оригинал остаётся на телефоне.");
+                            long pts=Math.max(lastPts+1,rawPts); lastPts=pts;
                             sample(false,buf,pts,info.flags);
                         }
                     } finally { video.releaseOutputBuffer(index,false); }
@@ -153,9 +158,10 @@ final class AvRecorder implements AutoCloseable {
         } catch(Exception e) { failAudio(e.getMessage()); }
     }
     synchronized void track(boolean isAudio,MediaFormat format) throws IOException {
-        if(isAudio) audioTrack=muxer.addTrack(format); else videoTrack=muxer.addTrack(format);
+        if(isAudio){audioFormat=format;audioTrack=muxer.addTrack(format);}else{videoFormat=format;videoTrack=muxer.addTrack(format);}
         if(!muxing && videoTrack>=0 && (!withAudio || audioTrack>=0)) {
             muxer.start(); muxing=true;
+            if(relay!=null)try{if(!videoFormat.containsKey(MediaFormat.KEY_FRAME_RATE))videoFormat.setInteger(MediaFormat.KEY_FRAME_RATE,fps);relay.format(videoFormat,audioFormat,rotation);}catch(Exception e){relay.finish("Не удалось передать конфигурацию кодека: "+e.getMessage());}
             for(Sample sample:pending) write(sample.audio(),ByteBuffer.wrap(sample.data()),sample.pts(),sample.flags());
             pending.clear(); pendingBytes=0;
         }
@@ -169,7 +175,8 @@ final class AvRecorder implements AutoCloseable {
     }
     void write(boolean isAudio,ByteBuffer buffer,long pts,int flags) {
         MediaCodec.BufferInfo info=new MediaCodec.BufferInfo(); info.set(buffer.position(),buffer.remaining(),pts,flags);
-        muxer.writeSampleData(isAudio?audioTrack:videoTrack,buffer,info);
+        ByteBuffer original=buffer.duplicate();muxer.writeSampleData(isAudio?audioTrack:videoTrack,buffer,info);
+        if(relay!=null)relay.sample(isAudio,original,pts,flags);
     }
     void stop() throws Exception {
         if(!started) return;

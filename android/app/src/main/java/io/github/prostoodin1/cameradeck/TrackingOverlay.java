@@ -21,6 +21,10 @@ final class TrackingOverlay extends View {
         CameraEngine e=activity.engine();if(e==null||!e.ready||e.previewWidth==0||!activity.showPreview)return;
         mirror=e.characteristics!=null&&Integer.valueOf(0).equals(e.characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING));geometry(e);
         paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(activity.dp(1));paint.setColor(e.afState==2||e.afState==4?0xff84e6a4:MainActivity.YELLOW);
+        paint.setColor(0x66ffffff);
+        if(activity.compositionGrid)for(float f:new float[]{1f/3,2f/3}){canvas.drawLine(left+width*f,top,left+width*f,top+height,paint);canvas.drawLine(left,top+height*f,left+width,top+height*f,paint);}
+        if(activity.safeArea)canvas.drawRect(left+width*.05f,top+height*.05f,left+width*.95f,top+height*.95f,paint);
+        paint.setColor(e.afState==2||e.afState==4?0xff84e6a4:MainActivity.YELLOW);
         try{
             if(e.tracking&&SystemClock.elapsedRealtime()-e.facesAt<800)for(int i=0;i<e.faces.length();i++){JSONObject face=e.faces.getJSONObject(i);float[] a=map((float)face.getDouble("left"),(float)face.getDouble("top")),b=map((float)face.getDouble("right"),(float)face.getDouble("bottom"));canvas.drawRoundRect(new RectF(Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[0],b[0]),Math.max(a[1],b[1])),activity.dp(5),activity.dp(5),paint);JSONArray eyes=face.getJSONArray("eyes");for(int j=0;j<eyes.length();j++){JSONArray eye=eyes.getJSONArray(j);float[] p=map((float)eye.getDouble(0),(float)eye.getDouble(1));canvas.drawCircle(p[0],p[1],activity.dp(5),paint);}}
             if(e.focusPoint!=null){float[] p=map(e.focusPoint[0],e.focusPoint[1]);float r=activity.dp(12);canvas.drawRect(p[0]-r,p[1]-r,p[0]+r,p[1]+r,paint);}

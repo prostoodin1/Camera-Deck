@@ -5,19 +5,21 @@ from PyQt6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,
     QComboBox,QLineEdit,QScrollArea,QGridLayout,QStackedWidget,QSplitter,QFormLayout,
     QTableWidget,QTableWidgetItem,QHeaderView,QPlainTextEdit,QAbstractItemView)
 from appearance import Toggle
+from icons import icon
 import production
 
 
 class Studio(QWidget):
     operation=pyqtSignal(object)
+    recording_event=pyqtSignal(object)
     def __init__(self,window):
-        super().__init__();self.window=window;self.selected=None;self.workspace=0;self.busy=False
+        super().__init__();self.window=window;self.selected=None;self.workspace=0;self.busy=False;self.pc_jobs={}
         self.setObjectName('root')
         outer=QVBoxLayout(self);outer.setContentsMargins(16,12,16,12);outer.setSpacing(10)
         top=QHBoxLayout();brand=QLabel('CAMERA DECK');brand.setStyleSheet('font-size:15px;font-weight:600;letter-spacing:2px');top.addWidget(brand);top.addSpacing(24)
         self.nav=[]
         for index,title in enumerate(('Монитор','Камера','Продакшн','Материалы')):
-            button=QPushButton(title);button.setCheckable(True);button.setObjectName('navigation');button.clicked.connect(lambda checked=False,i=index:self.navigate(i));top.addWidget(button);self.nav.append(button)
+            button=QPushButton(title);button.setIcon(icon(("monitor","control","production","media")[index]));button.setCheckable(True);button.setObjectName('navigation');button.clicked.connect(lambda checked=False,i=index:self.navigate(i));top.addWidget(button);self.nav.append(button)
         top.addStretch();window.connection_count=QLabel('Нет камер');top.addWidget(window.connection_count)
         window.devices_button=QPushButton('Устройства');window.devices_button.setCheckable(True);window.devices_button.setChecked(True);top.addWidget(window.devices_button)
         outer.addLayout(top)
@@ -28,7 +30,7 @@ class Studio(QWidget):
         manual=QPushButton('По IP');manual.clicked.connect(window.manual);actions.addWidget(manual);side.addLayout(actions)
         window.device_list=QComboBox();window.device_list.setPlaceholderText('Выберите телефон');side.addWidget(window.device_list)
         connect=QPushButton('Подключить');connect.setObjectName('primary');connect.clicked.connect(window.connect_device);side.addWidget(connect)
-        window.device_cards=QWidget();window.device_cards_layout=QVBoxLayout(window.device_cards);window.device_cards_layout.setContentsMargins(0,8,0,8);window.device_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        window.device_cards=QWidget();window.device_cards.setObjectName("deviceCards");window.device_cards.setAttribute(Qt.WidgetAttribute.WA_StyledBackground);window.device_cards_layout=QVBoxLayout(window.device_cards);window.device_cards_layout.setContentsMargins(0,8,0,8);window.device_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         devices_scroll=QScrollArea();devices_scroll.setWidgetResizable(True);devices_scroll.setWidget(window.device_cards);side.addWidget(devices_scroll,1)
         window.hint=QLabel('Одна локальная сеть.\nВключите камеру на телефоне.');window.hint.setWordWrap(True);window.hint.setObjectName('muted');side.addWidget(window.hint)
         window.devices_button.toggled.connect(window.sidebar.setVisible);self.split.addWidget(window.sidebar)
@@ -42,7 +44,8 @@ class Studio(QWidget):
         window.empty=QLabel('Подключите первую камеру\n\nВключите Camera Deck на телефоне, затем нажмите «Найти».\nПосле первого сопряжения доверенный телефон подключится без PIN.');window.empty.setWordWrap(True);window.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);window.empty.setMinimumHeight(320);window.empty.setObjectName('emptyMonitor');window.grid.addWidget(window.empty,0,0)
         prod=QWidget();layout=QVBoxLayout(prod);layout.setContentsMargins(0,0,0,0)
         row=QHBoxLayout();self.group_start=QPushButton('● Записать группу');self.group_start.setObjectName('recordAction');self.group_stop=QPushButton('■ Остановить группу');row.addWidget(self.group_start);row.addWidget(self.group_stop);row.addStretch();layout.addLayout(row)
-        note=QLabel('Команды отправляются выбранной группе. Подтверждение — отдельно от каждой камеры.\nОдновременная отправка не означает покадровую синхронизацию.');note.setObjectName('muted');note.setWordWrap(True);layout.addWidget(note)
+        calibrate=QPushButton('Оценить расхождение часов');calibrate.clicked.connect(self.calibrate);row.addWidget(calibrate)
+        note=QLabel('Команды отправляются выбранной группе. Подтверждение — отдельно от каждой камеры.\nОценка часов не синхронизирует экспозицию и не гарантирует совпадение кадров.');note.setObjectName('muted');note.setWordWrap(True);layout.addWidget(note)
         self.table=QTableWidget(0,6);self.table.setHorizontalHeaderLabels(['Камера','Режим','Состояние','Длительность','Накопитель','Последняя операция']);self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch);self.table.verticalHeader().hide();layout.addWidget(self.table,1)
         self.timeline=QPlainTextEdit();self.timeline.setReadOnly(True);self.timeline.setMaximumBlockCount(200);self.timeline.setMaximumHeight(140);layout.addWidget(self.timeline);self.pages.addWidget(prod)
         from media_browser import MediaBrowser
@@ -58,6 +61,16 @@ class Studio(QWidget):
             button=QPushButton(title);button.clicked.connect(lambda checked=False,m=method:self.invoke(m));form.addWidget(button)
         self.mode=QComboBox();self.mode.addItem('Фото','photo');self.mode.addItem('Видео','video');self.mode.activated.connect(lambda _:self.selected and self.selected.command('capture_config',mode=self.mode.currentData()));form.addWidget(self.mode)
         actions=QHBoxLayout();self.photo=QPushButton('Снять фото');self.photo.clicked.connect(lambda:self.selected and self.selected.command('photo'));self.record=QPushButton('● Запись');self.record.setObjectName('recordAction');self.record.clicked.connect(lambda:self.selected and self.selected.command('record_stop' if self.selected.status.get('recording') else 'record_start'));actions.addWidget(self.photo);actions.addWidget(self.record);form.addLayout(actions)
+        self.record_pc=QPushButton('Запись оригинала на ПК');self.record_pc.setObjectName('recordAction');self.record_pc.clicked.connect(self.pc_record);form.addWidget(self.record_pc)
+        pc_note=QLabel('Исходные видео и звук. Резервная копия остаётся на телефоне.');pc_note.setObjectName('muted');pc_note.setWordWrap(True);form.addWidget(pc_note)
+        self.pc_status=QLabel('');self.pc_status.setWordWrap(True);form.addWidget(self.pc_status)
+        self.recording_event.connect(self.pc_event)
+        form.addWidget(QLabel('ИНСТРУМЕНТЫ ПРОСМОТРА'))
+        self.tool=QComboBox()
+        for title,key in [('Обычный вид','none'),('Гистограмма','histogram'),('Waveform','waveform'),('Zebra ≥235/255','zebra'),('False color','false')]:self.tool.addItem(title,key)
+        self.tool.setToolTip('Приблизительный анализ 8-bit предпросмотра. Не измерение RAW, HDR или экспозиции сенсора.');self.tool.activated.connect(self.monitor_tools);form.addWidget(self.tool)
+        self.grid_lines=Toggle('Сетка третей');self.grid_lines.toggled.connect(self.monitor_tools);form.addWidget(self.grid_lines)
+        self.safe_area=Toggle('Безопасная область 90%');self.safe_area.toggled.connect(self.monitor_tools);form.addWidget(self.safe_area)
         self.group=QLineEdit();self.group.setPlaceholderText('Группа камеры');self.group.editingFinished.connect(self.change_group);form.addWidget(self.group)
         self.view=Toggle('Предпросмотр');self.view.toggled.connect(lambda value:self.selected and self.selected.view_toggle.setChecked(value));form.addWidget(self.view)
         self.audio=Toggle('Слушать микрофон');self.audio.toggled.connect(lambda value:self.selected and self.selected.listen.setChecked(value));form.addWidget(self.audio)
@@ -71,6 +84,7 @@ class Studio(QWidget):
         window.install_button=QPushButton('Обновить Windows');window.install_button.setEnabled(False);window.install_button.clicked.connect(window.install_windows);footer.addWidget(window.install_button);outer.addLayout(footer)
         self.group_start.clicked.connect(lambda:self.operate(True));self.group_stop.clicked.connect(lambda:self.operate(False));self.operation.connect(self.operation_result);self.results={}
         self.timer=QTimer(self);self.timer.timeout.connect(self.refresh);self.timer.start(1000)
+        self.saved_selection=window.load_preferences().get('selectedCamera','')
         self.navigate(0)
 
     def navigate(self,index):
@@ -90,7 +104,7 @@ class Studio(QWidget):
         if self.selected:self.selected.quick_sensor(key,getattr(self.selected,{'iso':'iso_readout','shutter':'shutter_readout','focus':'focus_readout'}[key]))
 
     def select(self,tile):
-        self.selected=tile;self.refresh()
+        self.selected=tile;self.saved_selection=getattr(tile.client,"fingerprint",tile.client.host);self.refresh()
         if self.workspace==3:self.media.set_camera(tile)
 
     def select_index(self,index):
@@ -102,7 +116,8 @@ class Studio(QWidget):
 
     def refresh(self):
         tiles=self.window.tiles
-        if self.selected not in tiles:self.selected=tiles[0] if tiles else None
+        if self.selected not in tiles:self.selected=next((t for t in tiles if getattr(t.client,"fingerprint",t.client.host)==self.saved_selection),tiles[0] if tiles else None)
+        if self.workspace==3 and self.media.camera is not self.selected:self.media.set_camera(self.selected)
         self.selection.blockSignals(True);self.selection.clear()
         for tile in tiles:self.selection.addItem(tile.name.text(),tile)
         if self.selected:self.selection.setCurrentIndex(tiles.index(self.selected))
@@ -114,7 +129,16 @@ class Studio(QWidget):
             value={'iso':s.get('iso') or '—','shutter':f"{s.get('exposureNs',0)/1e6:.2f} мс",'focus':'Авто' if s.get('focus',-1)<0 else s['focus']}[key]
             button.setText({'iso':'ISO','shutter':'Выдержка','focus':'Фокус'}[key]+'   '+str(value));button.setEnabled(bool(s.get('ready')))
         self.record.setText('■ Стоп' if s.get('recording') else '● Запись');self.record.setEnabled(bool(s.get('ready')) and s.get('mode')=='video');self.photo.setEnabled(bool(s.get('ready')) and not s.get('recording') and s.get('mode')=='photo')
+        job=self.pc_jobs.get(id(self.selected),{})
+        active=job.get('state') in ('starting','recording')
+        self.record_pc.setText('■ Остановить запись на ПК' if active else 'Запись оригинала на ПК')
+        self.record_pc.setEnabled(bool(s.get('ready')) and s.get('mode')=='video' and bool(s.get('originalRecording')) and (not s.get('recording') or active))
+        if active and not s.get('recording'):self.record_pc.setEnabled(False)
+        self.pc_status.setText(job.get('message','Телефон должен поддерживать протокол оригинальной записи (Android 10+).') if self.selected else '')
+        if active and not s.get('recording'):self.record.setEnabled(False)
         if self.selected:
+            for control,value in [(self.grid_lines,self.selected.video.grid_lines),(self.safe_area,self.selected.video.safe_area)]:control.blockSignals(True);control.setChecked(value);control.blockSignals(False)
+            self.tool.blockSignals(True);self.tool.setCurrentIndex(max(0,self.tool.findData(self.selected.video.tool)));self.tool.blockSignals(False)
             if not self.group.hasFocus():self.group.setText(self.selected.group.text())
             for control,value in [(self.view,self.selected.view_toggle.isChecked()),(self.audio,self.selected.listen.isChecked()),(self.lock,self.selected.rotation.locked_base is not None)]:control.blockSignals(True);control.setChecked(value);control.blockSignals(False)
         self.table.setRowCount(len(tiles))
@@ -143,3 +167,41 @@ class Studio(QWidget):
             else:tile.failures+=1
             self.timeline.appendPlainText(datetime.now().strftime('%H:%M:%S')+' · '+tile.name.text()+' · '+('✓ ' if ok else 'Ошибка: ')+message)
         self.refresh()
+
+    def pc_record(self):
+        if self.selected is None:return
+        from PyQt6.QtWidgets import QFileDialog
+        from pathlib import Path
+        from recording import receive_original
+        tile=self.selected;identity=id(tile);client=tile.client;job=self.pc_jobs.get(identity,{})
+        if job.get('state') in ('starting','recording'):
+            self.window.run(lambda:client.command('record_stop'));return
+        path,_=QFileDialog.getSaveFileName(self.window,'Запись оригинала на ПК','','Видео MP4 (*.mp4)')
+        if not path:return
+        destination=Path(path)
+        if destination.suffix.lower()!='.mp4':destination=destination.with_suffix('.mp4')
+        self.pc_jobs[identity]={'state':'starting','message':'Подключаем поток оригинала. Ждём подтверждения кодера.'};self.refresh()
+        def notify(state,data):self.recording_event.emit((identity,state,data))
+        self.window.run(lambda:receive_original(client,destination,notify),lambda _:None,lambda message:self.pc_event((identity,'error',{'message':message})))
+
+    def pc_event(self,event):
+        identity,state,data=event
+        message={'starting':'Телефон принял команду. Ожидаем дорожки оригинала.','recording':f"Пишем на ПК · {data.get('bytes',0)/1048576:.1f} МБ · резерв на телефоне",'complete':'Готово: '+data.get('path',''),'error':'Запись на ПК прервана. Проверьте резерв на телефоне. '+data.get('message','')}[state]
+        self.pc_jobs[identity]={'state':state,'message':message};self.refresh()
+
+    def monitor_tools(self,*_):
+        if self.selected:
+            values=(self.tool.currentData(),self.grid_lines.isChecked(),self.safe_area.isChecked());self.selected.video.set_tools(*values)
+            if self.selected.fullscreen is not None:self.selected.full_view.set_tools(*values)
+
+    def calibrate(self):
+        targets=[(t.name.text(),t.client) for t in self.window.tiles]
+        def work():
+            result=[]
+            for name,client in targets:
+                try:
+                    estimate=production.estimate_clock(client)
+                    result.append(f"{name}: смещение {estimate['offsetNs']/1e6:+.2f} мс, погрешность не меньше ±{estimate['uncertaintyNs']/1e6:.2f} мс")
+                except Exception:result.append(name+': оценка часов недоступна (проверьте связь и версию телефона)')
+            return result
+        self.window.run(work,lambda rows:[self.timeline.appendPlainText(row) for row in rows])

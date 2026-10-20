@@ -19,6 +19,7 @@ class MediaBrowser(QWidget):
         bar=QHBoxLayout();self.search=QLineEdit();self.search.setPlaceholderText('Поиск по имени');self.search.textChanged.connect(self.filter);bar.addWidget(self.search)
         self.kind=QComboBox();self.kind.addItems(['Все материалы','Видео','Фото','Незавершённые']);self.kind.currentIndexChanged.connect(self.filter);bar.addWidget(self.kind)
         refresh=QPushButton('Обновить');refresh.clicked.connect(self.reload);bar.addWidget(refresh);layout.addLayout(bar)
+        recovery=QPushButton('Восстановить незавершённую запись ПК');recovery.clicked.connect(self.recover);layout.addWidget(recovery)
         self.notice=QLabel('Выберите подключённую камеру в рабочем пространстве «Камера».');self.notice.setWordWrap(True);self.notice.setObjectName('muted');layout.addWidget(self.notice)
         self.list=QListWidget();self.list.setIconSize(__import__('PyQt6.QtCore',fromlist=['QSize']).QSize(128,72));self.list.currentItemChanged.connect(self.selection);layout.addWidget(self.list,1)
         actions=QHBoxLayout();self.download=QPushButton('Скачать оригинал');self.download.setObjectName('primary');self.download.clicked.connect(self.save);actions.addWidget(self.download)
@@ -37,12 +38,12 @@ class MediaBrowser(QWidget):
     def reload(self):
         self.epoch+=1;epoch=self.epoch;camera=self.camera;self.list.clear();self.items={};self.selection()
         if camera is None:return
-        self.notice.setText('Читаем материалы · '+camera.name.text());client=camera.client
+        camera_name=camera.name.text();self.notice.setText('Читаем материалы · '+camera_name);client=camera.client
         def loaded(data):
             if epoch!=self.epoch:return
             for entry in data.get('files',[]):
                 item=QListWidgetItem();item.setData(Qt.ItemDataRole.UserRole,entry);self.list.addItem(item);self.items[entry['name']]=item;self.label(item)
-            self.notice.setText(f"{camera.name.text()} · материалов: {self.list.count()}. Миниатюры анализируют готовый файл, без изменения оригинала.")
+            self.notice.setText(f"{camera_name} · материалов: {self.list.count()}. Миниатюры анализируют готовый файл, без изменения оригинала.")
             self.filter();names=list(self.items);self.window.run(lambda:enrich(names),lambda _:None,lambda _:None)
         def enrich(names):
             for name in names[:100]:
@@ -108,3 +109,12 @@ class MediaBrowser(QWidget):
             from PyQt6.QtGui import QDesktopServices
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(file)));return
         self.video.show();self.position.show();self.player.setSource(QUrl.fromLocalFile(str(file)));self.player.play()
+
+    def recover(self):
+        from recording import recover_partial
+        source,_=QFileDialog.getOpenFileName(self,'Незавершённая запись ПК','','MP4 (*.partial.mp4 *.mp4)')
+        if not source:return
+        destination,_=QFileDialog.getSaveFileName(self,'Сохранить восстановленную копию',str(Path(source).with_suffix('.recovered.mp4')),'MP4 (*.mp4)')
+        if not destination:return
+        self.notice.setText('Восстанавливаем читаемые фрагменты. Исходный файл сохраняется.')
+        self.window.run(lambda:recover_partial(source,destination),lambda file:self.notice.setText('Восстановленная копия: '+str(file)),lambda error:self.notice.setText('Восстановление не удалось. Исходник сохранён. '+error))

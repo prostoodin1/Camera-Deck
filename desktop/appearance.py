@@ -113,6 +113,7 @@ QListWidget::item {padding:10px;border-bottom:1px solid #252b33}
 QProgressBar {background:#101318;border:0;border-radius:3px;max-height:6px;color:transparent}
 QProgressBar::chunk {background:#ffd76b;border-radius:3px}
 QSplitter::handle {background:#080a0c;width:10px}
+QWidget#deviceCards {background:#15181c}
 """
 
 
@@ -126,6 +127,9 @@ class Viewfinder(QLabel):
     def __init__(self):
         super().__init__()
         self.frame_rotation=0;self.on_focus=None;self.image_target=None
+        self.tool='none';self.grid_lines=False;self.safe_area=False;self.analysis=None
+        from monitor_tools import MonitorAnalyzer
+        self.analyzer=MonitorAnalyzer(self);self.analyzer.ready.connect(self.analysis_ready)
         self.backdrop=None;self.frame=None;self.telemetry={};self.message="ОЖИДАНИЕ ИЗОБРАЖЕНИЯ"
         self.setMinimumSize(240,200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
@@ -144,8 +148,18 @@ class Viewfinder(QLabel):
     def setText(self,text):
         self.frame=None;self.message=text;self.update()
 
+    def set_tools(self,tool='none',grid=False,safe=False):
+        if tool!=self.tool:self.analyzer.invalidate();self.analysis=None
+        self.tool=tool;self.grid_lines=grid;self.safe_area=safe
+        if self.frame is not None and tool!='none':self.analyzer.offer(self.frame,tool)
+        self.update()
+
+    def analysis_ready(self,result):
+        if result['epoch']==self.analyzer.epoch and result['mode']==self.tool:self.analysis=result;self.update()
+
     def set_frame(self,image):
         self.frame=image
+        if self.tool!='none':self.analyzer.offer(image,self.tool)
         # A low-resolution, smoothly enlarged frame forms a soft photographic backdrop.
         self.backdrop=image.scaled(24,14,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
         self.update()
@@ -165,6 +179,21 @@ class Viewfinder(QLabel):
                 painter.drawImage(area,self.backdrop)
                 painter.fillRect(self.rect(),QColor(8,14,24,170))
             painter.drawImage(target,self.frame);self.image_target=target
+            if self.analysis and 'overlay' in self.analysis:painter.drawImage(target,self.analysis['overlay'])
+            painter.setPen(QPen(QColor(255,255,255,95),1))
+            if self.grid_lines:
+                for fraction in (1/3,2/3):
+                    painter.drawLine(QPointF(target.left()+target.width()*fraction,target.top()),QPointF(target.left()+target.width()*fraction,target.bottom()))
+                    painter.drawLine(QPointF(target.left(),target.top()+target.height()*fraction),QPointF(target.right(),target.top()+target.height()*fraction))
+            if self.safe_area:painter.drawRect(target.adjusted(target.width()*.05,target.height()*.05,-target.width()*.05,-target.height()*.05))
+            if self.analysis and self.tool in ('histogram','waveform'):
+                scope=QRectF(target.left()+12,target.bottom()-110,180,80);painter.fillRect(scope,QColor(8,10,12,220))
+                if self.tool=='waveform':painter.drawImage(scope,self.analysis['waveform'])
+                else:
+                    counts=self.analysis['histogram'];peak=max(counts) or 1;painter.setPen(QPen(QColor('#b3becb'),1))
+                    for i,count in enumerate(counts):painter.drawLine(QPointF(scope.left()+i*scope.width()/256,scope.bottom()),QPointF(scope.left()+i*scope.width()/256,scope.bottom()-count/peak*scope.height()))
+            if self.tool!='none':
+                painter.setPen(QColor('#c5cbd3'));painter.setFont(QFont('Segoe UI',8));painter.drawText(int(target.left()+12),int(target.top()+45),'Анализ 8-bit предпросмотра · '+self.tool)
             s=self.telemetry
             def position(x,y):
                 if self.frame_rotation==90:x,y=1-y,x

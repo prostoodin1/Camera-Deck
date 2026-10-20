@@ -20,7 +20,7 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     static final int BLACK=CameraDesign.BLACK,PANEL=CameraDesign.PANEL,YELLOW=CameraDesign.ACCENT,WHITE=CameraDesign.TEXT,MUTED=CameraDesign.MUTED;
-    View secondaryControls;boolean cleanMonitor;Button cleanButton;
+    View secondaryControls;boolean cleanMonitor,compositionGrid,safeArea;Button cleanButton;
     final Handler ui=new Handler(Looper.getMainLooper());
     TextView state,telemetry,notice,center,code,fingerprint;
     ImageView preview;
@@ -100,7 +100,7 @@ public class MainActivity extends Activity {
         state=text("Камера выключена",11,YELLOW);top.addView(state);if(landscape){connection.setVisibility(View.GONE);state.setVisibility(View.GONE);}FrameLayout.LayoutParams topLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);if(landscape)topLayout.rightMargin=dp(250);root.addView(top,topLayout);
         LinearLayout bottom=column();bottom.setPadding(dp(14),dp(8),dp(14),dp(12));bottom.setBackground(panel(0xed080a0c,0x00000000,0));
         storage=text("",11,MUTED);storage.setOnClickListener(v->storageSettings());bottom.addView(storage);
-        notice=text("",11,MUTED);notice.setMaxLines(2);bottom.addView(notice);
+        notice=text("",11,MUTED);notice.setMaxLines(2);notice.setOnClickListener(v->{CameraEngine e=engine();if(e!=null&&!e.error.isEmpty())dialog().setTitle("Диагностика камеры").setMessage(e.error).setPositiveButton("Закрыть",null).show();});bottom.addView(notice);
         LinearLayout controls=row();mode=button("Фото",()->{CameraEngine e=engine();if(e!=null)command("capture_config","mode",e.captureMode.equals("photo")?"video":"photo");});
         shutter=new CameraDesign.Shutter(this);shutter.setOnClickListener(v->{CameraEngine e=engine();if(e!=null)command(e.captureMode.equals("photo")?"photo":e.recording?"record_stop":"record_start");});
         cell(controls,mode,44);cell(controls,shutter,68);cell(controls,button("Объектив",this::lensSettings),44);bottom.addView(controls);
@@ -178,7 +178,10 @@ public class MainActivity extends Activity {
         dialog().setTitle("Композиция кадра").setView(scroll(body)).setNegativeButton("Отмена",null).setPositiveButton("Применить",(d,w)->command("framing","zoom",e.minZoom*Math.exp(span*zoom.getProgress()/1000.0),"autoZoom",automatic.isChecked(),"tracking",tracking.isChecked(),"faceFocus",faceFocus.isChecked(),"preset",keys[preset.getSelectedItemPosition()])).show();
     }
     void powerSettings(){
-        LinearLayout body=dialogBody();body.addView(button("Кадр, зум и лица",this::framingSettings));body.addView(button("Доверенные компьютеры",this::trustedSettings));body.addView(button("Папка сохранения",this::storageSettings));body.addView(button("Все возможности камеры",this::capabilityDetails));CheckBox view=check("Локальный видоискатель",showPreview);view.setOnCheckedChangeListener((v,value)->localPreview.setChecked(value));body.addView(view);eco=check("Экономный режим предпросмотра",getSharedPreferences("deck",0).getBoolean("eco",false));
+        LinearLayout body=dialogBody();
+        CheckBox grid=check("Сетка третей",compositionGrid);grid.setOnCheckedChangeListener((v,value)->{compositionGrid=value;trackingOverlay.invalidate();});body.addView(grid);
+        CheckBox safe=check("Безопасная область 90%",safeArea);safe.setOnCheckedChangeListener((v,value)->{safeArea=value;trackingOverlay.invalidate();});body.addView(safe);
+        body.addView(button("Кадр, зум и лица",this::framingSettings));body.addView(button("Доверенные компьютеры",this::trustedSettings));body.addView(button("Папка сохранения",this::storageSettings));body.addView(button("Все возможности камеры",this::capabilityDetails));CheckBox view=check("Локальный видоискатель",showPreview);view.setOnCheckedChangeListener((v,value)->localPreview.setChecked(value));body.addView(view);eco=check("Экономный режим предпросмотра",getSharedPreferences("deck",0).getBoolean("eco",false));
         eco.setOnCheckedChangeListener((v,value)->{getSharedPreferences("deck",0).edit().putBoolean("eco",value).apply();CameraEngine e=engine();if(e!=null)e.setEco(value);});body.addView(eco);
         body.addView(text("ECO снижает нагрузку предпросмотра. Разрешение и FPS оригинала записи сохраняются. Экран можно выключить; остановка камеры доступна в уведомлении.",13,MUTED));
         body.addView(button("ПРОДОЛЖИТЬ В ФОНЕ",()->moveTaskToBack(true)));
@@ -281,7 +284,7 @@ public class MainActivity extends Activity {
     }
 
 
-    void toggle(){if(CameraService.active!=null){stopService(new Intent(this,CameraService.class));return;}if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO},10);return;}startCameraService();}
+    void toggle(){if(CameraService.active!=null&&CameraService.active.engine.recording){dialog().setTitle("Завершить съёмку?").setMessage("Камера выключится. Перед отключением дождитесь завершения записи и сохранения файла.").setPositiveButton("Остановить запись",(d,w)->command("record_stop")).setNegativeButton("Продолжить съёмку",null).show();return;}if(CameraService.active!=null){stopService(new Intent(this,CameraService.class));return;}if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO},10);return;}startCameraService();}
     void startCameraService(){if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);startForegroundService(new Intent(this,CameraService.class));}
     @Override public void onRequestPermissionsResult(int req,String[] permissions,int[] results){super.onRequestPermissionsResult(req,permissions,results);if(req==10){if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED)startCameraService();else toast("Разрешите доступ к камере в настройках приложения");}}
     String shutterValue(long ns){if(ns<=0)return "—";double seconds=ns/1e9;return seconds<1?"1/"+Math.round(1/seconds):String.format(Locale.US,"%.1f\"",seconds);}
@@ -299,7 +302,8 @@ public class MainActivity extends Activity {
         isoReadout.setText("ISO  "+(e.measuredIso>0?e.measuredIso:"—"));shutterReadout.setText("S  "+shutterValue(e.measuredExposure));formatReadout.setText((e.captureMode.equals("video")?e.videoHeight+"p · "+e.videoFps+" fps":e.photoFormat.toUpperCase(Locale.US))+" ▴");
         mode.setText(e.captureMode.equals("video")?"Видео":"Фото");buttonStyle(mode,false);((CameraDesign.Shutter)shutter).state(e.captureMode.equals("photo"),e.recording);
         center.setVisibility(showPreview&&(e.nativePreview||displayedFrame!=null)?View.GONE:View.VISIBLE);center.setText(showPreview?"Запускаем камеру…":"Просмотр приостановлен\nВключите «Показывать камеру»");
-        String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?error:!s.updateMessage.isEmpty()?s.updateMessage:(!UpdateClient.message.isEmpty()&&new File(getFilesDir(),"update.apk").isFile())?UpdateClient.message:(e.captureMode.equals("video")?e.videoWidth+" × "+e.videoHeight+" · "+e.videoFps+" fps · "+(e.sound?"Со звуком":"Без звука"):e.photoFormat.toUpperCase(Locale.US)+" · "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)));
+        String error=e.error.isEmpty()?s.error:e.error;notice.setText(!error.isEmpty()?CameraIssue.summary(error):!s.updateMessage.isEmpty()?s.updateMessage:(!UpdateClient.message.isEmpty()&&new File(getFilesDir(),"update.apk").isFile())?UpdateClient.message:(e.captureMode.equals("video")?e.videoWidth+" × "+e.videoHeight+" · "+e.videoFps+" fps · "+(e.sound?"Со звуком":"Без звука"):e.photoFormat.toUpperCase(Locale.US)+" · "+String.format(Locale.US,"%.1f Мп",e.photoWidth*e.photoHeight/1e6)));
+        if(android.os.Build.VERSION.SDK_INT>=29&&getSystemService(PowerManager.class).getCurrentThermalStatus()>=PowerManager.THERMAL_STATUS_SEVERE)notice.append(" · Система ограничивает производительность из-за нагрева");
         if(SystemClock.elapsedRealtime()>nextStorageRefresh){nextStorageRefresh=SystemClock.elapsedRealtime()+3000;new Thread(()->{long free=e.store.freeBytes(),phone=e.mediaDir.getUsableSpace();String label=e.store.label();ui.post(()->storage.setText(label+" · "+(free>=0?android.text.format.Formatter.formatFileSize(this,free)+" свободно":"объём недоступен")+(e.store.tree()!=null?"  /  телефон: "+android.text.format.Formatter.formatFileSize(this,phone):"")));},"CameraDeck-storage-status").start();}
         if(qualitySheet!=null&&qualitySheet.isShowing()){
             if((videoControl!=null)!=e.captureMode.equals("video")){qualitySheet.dismiss();}
