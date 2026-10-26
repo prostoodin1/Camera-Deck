@@ -22,6 +22,16 @@ def main():
               "--add-data", "../THIRD_PARTY_NOTICES.md;."]
     for dll in required:
         common += ["--add-binary", f"{dll};."]
+    sys.path.insert(0,str(ROOT/'desktop'))
+    from usb_transport import adb_path
+    platform_tools=Path(adb_path()).parent
+    for name in ('adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll'):
+        source=platform_tools/name
+        if not source.is_file():raise SystemExit('Incomplete USB runtime: '+name)
+        common += ['--add-binary',f'{source};platform-tools']
+    notice=platform_tools/'NOTICE.txt'
+    if not notice.is_file():raise SystemExit('Missing Android Platform Tools NOTICE.txt')
+    common += ['--add-data',f'{notice};platform-tools']
     subprocess.run(common + ["--onefile", "--name", "CameraDeck", "main.py"], cwd=ROOT / "desktop", check=True)
     subprocess.run(common + ["--onedir", "--name", "CameraDeck-Portable", "main.py"], cwd=ROOT / "desktop", check=True)
     folder = ROOT / "desktop/dist/CameraDeck-Portable"

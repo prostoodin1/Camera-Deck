@@ -95,7 +95,7 @@ def test_iso_popup_keeps_exposure_paired_with_manual_iso(tmp_path,monkeypatch):
         host="192.168.1.2"
         def command(self,action,**values):commands.append((action,values))
     tile=CameraTile(window,Client(),"Phone");tile.status={"manualSensor":True,"isoMin":50,"isoMax":3200,"iso":100,"exposureNs":10000000,"focus":-1}
-    window.run=lambda fn,callback:callback(fn())
+    window.run=lambda fn,callback,failure=None:callback(fn())
     def choose(dialog):
         dialog.findChild(Toggle).setChecked(False)
         dialog.findChild(SliderField).slider.setValue(10000)

@@ -13,3 +13,7 @@ Camera Deck source is distributed under GPL-3.0-only. The public Windows executa
 - Google ML Kit face-detection 16.1.7 (bundled model), Google Play services / AndroidX transitive dependencies: https://developers.google.com/ml-kit/terms and their Maven POM license notices. Faces are processed locally. This SDK is an external dependency, not Camera Deck source.
 
 The Android package uses Android system APIs. Development-only JUnit and JSON-java dependencies are not included in release APKs. No production signing private keys, Android keystores, user recordings or GitHub credentials are included in this repository.
+
+## Android Platform Tools
+
+Windows distributions include ADB and its Windows USB support DLLs from Android Platform Tools. The accompanying upstream license notices are preserved in `platform-tools/NOTICE.txt` inside the distribution. ADB source: https://android.googlesource.com/platform/packages/modules/adb/ .

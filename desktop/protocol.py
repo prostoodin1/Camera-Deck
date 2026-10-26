@@ -67,8 +67,13 @@ def discover(seconds: float = 2.0) -> list[dict]:
 
 
 class CameraClient:
-    def __init__(self, host: str, fingerprint: str = ""):
-        self.host = local_host(host)
+    def __init__(self, host: str, fingerprint: str = "", *, port: int = 39812, transport: str = "lan"):
+        if transport not in ('lan','usb'):raise ValueError('Unknown transport')
+        if transport=='usb' and host!='127.0.0.1':raise ValueError('USB tunnel must use loopback')
+        if not isinstance(port,int) or isinstance(port,bool) or not 1<=port<=65535:raise ValueError('Invalid port')
+        if transport=='lan' and port!=39812:raise ValueError('Unexpected LAN port')
+        self.host = host if transport=='usb' else local_host(host)
+        self.port=port;self.transport=transport
         self.fingerprint = fingerprint.replace(" ", "").lower()
         self.token = ""
         self.refresh_secret="";self.session_lock=threading.Lock()
@@ -78,7 +83,7 @@ class CameraClient:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE  # explicit certificate pin below
         context.minimum_version = ssl.TLSVersion.TLSv1_2
-        conn = http.client.HTTPSConnection(self.host, 39812, timeout=8, context=context)
+        conn = http.client.HTTPSConnection(self.host, self.port, timeout=8, context=context)
         try:
             try:
                 conn.connect()

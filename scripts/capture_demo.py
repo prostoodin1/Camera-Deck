@@ -61,7 +61,7 @@ class State:
     def status(self):
         return {"ready":True,"recording":self.recording,"error":"ТЕСТОВЫЙ СТЕНД · Android не подключён","cameraId":"0","rotation":0,"frameTime":int(time.time()*1000),
             "frameSequence":int(time.time()*10),"iso":100 if self.index==0 else 200,"exposureNs":10000000,"manualIso":0,"manualExposureNs":0,"focus":-1,
-            "lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
+            "audioInputs":[{"id":1,"name":"Микрофон телефона · симулятор"},{"id":2,"name":"USB-микрофон · симулятор"}],"audioInput":0,"audioRoutedName":"Микрофон телефона · симулятор","lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
             "mode":self.mode,"videoWidth":self.width,"videoHeight":self.height,"videoFps":self.fps,"photoWidth":4000,"photoHeight":3000,"photoFormat":self.photoFormat,
             "powerState":"record_preview" if self.recording else "preview","eco":False,"previewFps":24,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
             "cameras":[{"id":"0","facing":1},{"id":"1","facing":0}],"captureCapabilities":{"videoModes":[{"width":1280,"height":720,"fps":[30,60]},{"width":1920,"height":1080,"fps":[30,60]},{"width":3840,"height":2160,"fps":[30]}],
@@ -122,7 +122,7 @@ def main():
     font=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts/segoeui.ttf"
     if font.is_file():QFontDatabase.addApplicationFont(str(font))
     app.setFont(QFont("Segoe UI",10))
-    out=ROOT/"docs/screenshots";out.mkdir(parents=True,exist_ok=True)
+    out=Path(os.environ.get('CAMERA_DECK_SCREENSHOTS',str(ROOT/'docs/screenshots')));out.mkdir(parents=True,exist_ok=True)
     key=ec.generate_private_key(ec.SECP256R1());name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"CameraDeck loopback simulator")]);now=datetime.datetime.now(datetime.timezone.utc)
     cert=x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(minutes=1)).not_valid_after(now+datetime.timedelta(days=1)).sign(key,hashes.SHA256())
     fingerprint=hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
@@ -169,6 +169,11 @@ def main():
                 dialog.show();app.processEvents();assert dialog.grab().save(str(out/"06-iso-popover.png"));return QDialog.DialogCode.Rejected
             QDialog.exec=capture_popup
             try:tile.quick_sensor("iso",tile.iso_readout)
+            finally:QDialog.exec=original
+            def capture_audio(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'07-audio-routing-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_audio
+            try:tile.audio_settings()
             finally:QDialog.exec=original
             states[1].recording=False
             for tile in window.tiles:tile.status["recording"]=False;tile.stopped.set();tile.monitor.stop()

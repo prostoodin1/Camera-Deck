@@ -483,6 +483,10 @@ final class CameraEngine implements AutoCloseable {
             if (!ready || busy) throw new IllegalStateException(error.isEmpty() ? "Camera is opening / busy" : error);
             power.operation(SystemClock.elapsedRealtime());
             switch (action) {
+                case "audio_input": {
+                    if(recording)throw new IllegalStateException("Остановите запись перед сменой микрофона");
+                    audio.selectInput(cmd.getInt("id"));break;
+                }
                 case "framing": {
                     float next=(float)cmd.optDouble("zoom",zoom);if(!Float.isFinite(next)||next<minZoom||next>maxZoom)throw new IllegalArgumentException("Зум вне диапазона камеры");
                     String preset=cmd.optString("preset",framing);if(Framing.target(preset)==0)throw new IllegalArgumentException("Неизвестный план");
@@ -581,7 +585,8 @@ final class CameraEngine implements AutoCloseable {
             .put("recordingElapsedMs",recording?SystemClock.elapsedRealtime()-recordingStartedMs:0).put("localDisplayFps",localDisplayFps).put("localConversionMs",localConversionMs).put("localHandoffMs",localHandoffMs)
             .put("cameraId", cameraId).put("rotation", rotation).put("frameTime", frameTime).put("frameSequence", frameSequence)
             .put("iso", measuredIso).put("exposureNs", measuredExposure).put("manualIso", iso).put("manualExposureNs", exposure).put("focus", focus)
-            .put("lastFile", lastFile).put("audio", sound).put("audioRecordingActive",recording&&activeRecorder!=null&&activeRecorder.audioTrack>=0&&activeRecorder.muxing).put("micCapturing",audio.capturing).put("micLevelDb",audio.capturing?audio.levelDb:JSONObject.NULL).put("thermalStatus",android.os.Build.VERSION.SDK_INT>=29?context.getSystemService(android.os.PowerManager.class).getCurrentThermalStatus():-1).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility").put("originalRecording",android.os.Build.VERSION.SDK_INT>=29).put("remoteRecordingError",relay==null?"":relay.error);
+            .put("lastFile", lastFile).put("audio", sound).put("audioRecordingActive",recording&&activeRecorder!=null&&activeRecorder.audioTrack>=0&&activeRecorder.muxing).put("micCapturing",audio.capturing).put("micLevelDb",audio.capturing?audio.levelDb:JSONObject.NULL).put("thermalStatus",android.os.Build.VERSION.SDK_INT>=29?context.getSystemService(android.os.PowerManager.class).getCurrentThermalStatus():-1).put("audioAvailable",audio.available()).put("audioError",audio.error).put("preview", "H.264 preferred / JPEG compatibility").put("originalRecording",android.os.Build.VERSION.SDK_INT>=29).put("remoteRecordingError",relay==null?"":relay.error)
+            .put("audioInputs",audio.inputs()).put("audioInput",audio.preferredInput).put("audioRoutedInput",audio.routedInput).put("audioRoutedName",audio.routedName).put("audioRouteWarning",audio.routeWarning);
         o.put("zoom",zoom).put("appliedZoom",measuredZoom==null?JSONObject.NULL:measuredZoom).put("appliedFocus",measuredFocus==null?JSONObject.NULL:measuredFocus).put("zoomMin",minZoom).put("zoomMax",maxZoom).put("autoZoom",autoZoom).put("framing",framing).put("tracking",tracking).put("trackingAvailable",!recording||recordPreview).put("faceFocus",faceFocus).put("faces",SystemClock.elapsedRealtime()-facesAt<800?faces:new JSONArray()).put("afState",afState).put("trackingAgeMs",facesAt==0?JSONObject.NULL:SystemClock.elapsedRealtime()-facesAt).put("trackingError",trackingError).put("streamProfile",liveProfile);
         if(focusPoint!=null)o.put("focusPoint",new JSONArray().put(focusPoint[0]).put(focusPoint[1]));
         o.put("mode",captureMode).put("videoWidth",videoWidth).put("videoHeight",videoHeight).put("videoFps",videoFps)

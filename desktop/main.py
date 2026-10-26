@@ -40,6 +40,8 @@ class CameraTile(QWidget):
         super().__init__()
         self.window, self.client = window, client
         self.stopped = threading.Event()
+        self.poll_wake=threading.Event()
+        self.command_pending=False
         self.paused = threading.Event()
         self.preview_enabled = threading.Event()
         self.preview_enabled.set()
@@ -129,6 +131,40 @@ class CameraTile(QWidget):
         self.group.hide()
         rail=QHBoxLayout();select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
         self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:(self.photo if self.status.get("mode")=="photo" else self.record).click());rail.addWidget(self.quick_record);box.addLayout(rail)
+
+    def audio_settings(self):
+        from PyQt6.QtMultimedia import QMediaDevices
+        dialog=GlassSheet(self.window);dialog.setWindowTitle('Звуковой тракт');dialog.setMinimumWidth(490)
+        form=QFormLayout(dialog)
+        inputs=QComboBox();inputs.addItem('Автоматически · Android',0)
+        for device in self.status.get('audioInputs',[]):inputs.addItem(device['name'],device['id'])
+        inputs.setCurrentIndex(max(0,inputs.findData(self.status.get('audioInput',0))))
+        inputs.setEnabled('audioInputs' in self.status and not self.status.get('recording'))
+        form.addRow('Вход на телефоне',inputs)
+        route=QLabel(self.status.get('audioRouteWarning') or self.status.get('audioRoutedName') or ('Для выбора входа обновите Android-приложение' if 'audioInputs' not in self.status else 'Фактический вход появится при включении звука'))
+        route.setWordWrap(True);form.addRow(route)
+        outputs=QComboBox();outputs.addItem('По умолчанию Windows',b'')
+        for device in QMediaDevices.audioOutputs():outputs.addItem(device.description(),bytes(device.id()))
+        index=outputs.findData(self.monitor.device_id)
+        if index<0:outputs.addItem('Выбранный выход отключён',self.monitor.device_id);index=outputs.count()-1
+        outputs.setCurrentIndex(index);form.addRow('Выход на ноутбуке',outputs)
+        volume=QSpinBox();volume.setRange(0,100);volume.setSuffix(' %');volume.setValue(round(self.monitor.volume*100));form.addRow('Громкость прослушивания',volume)
+        note=QLabel('Громкость выхода влияет только на прослушивание. Звук в видео берётся с телефона.');note.setWordWrap(True);form.addRow(note)
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Apply|QDialogButtonBox.StandardButton.Close);form.addRow(buttons)
+        buttons.button(QDialogButtonBox.StandardButton.Apply).setText('Применить');buttons.button(QDialogButtonBox.StandardButton.Close).setText('Закрыть')
+        buttons.rejected.connect(dialog.reject)
+        def apply():
+            selected_input=inputs.currentData()
+            selected_output=outputs.currentData();selected_volume=volume.value()/100
+            def done(_=None):
+                try:self.monitor.configure_output(selected_output,selected_volume)
+                except Exception as error:self.window.message('Выход звука',str(error));return
+                dialog.accept()
+            if inputs.isEnabled() and inputs.currentData()!=self.status.get('audioInput',0):
+                buttons.setEnabled(False)
+                self.window.run(lambda:self.client.command('audio_input',id=selected_input),done,lambda message:(buttons.setEnabled(True),self.window.message('Вход звука',message)))
+            else:done()
+        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(apply);dialog.exec()
 
     def framing_settings(self):
         s=self.status;dialog=GlassSheet(self.window);dialog.setWindowTitle("Композиция и просмотр");form=QFormLayout(dialog)
@@ -262,7 +298,7 @@ class CameraTile(QWidget):
             except Exception as exc:
                 if self.stopped.is_set():return
                 self.feed.failure.emit(str(exc))
-            self.stopped.wait(1 if self.preview_enabled.is_set() else 3)
+            self.poll_wake.wait(1 if self.preview_enabled.is_set() else 3);self.poll_wake.clear()
 
     def show_preview_error(self,message):
         from errors import explain
@@ -317,7 +353,11 @@ class CameraTile(QWidget):
             self.phone_update.setVisible(self.window.available["code"] > status.get("versionCode",0))
 
     def command(self, action, **kwargs):
-        self.window.run(lambda: self.client.command(action, **kwargs), lambda _: self.info.setText("Команда принята; ожидаем состояние камеры…"))
+        if self.command_pending:return
+        self.command_pending=True;self.info.setText('Применяем…')
+        def done(_):self.command_pending=False;self.poll_wake.set()
+        def failed(message):self.command_pending=False;self.poll_wake.set();self.window.message('Команда камеры',message)
+        self.window.run(lambda:self.client.command(action,**kwargs),done,failed)
 
     def quick_sensor(self,kind,anchor):
         s=self.status
@@ -494,11 +534,16 @@ class Window(QMainWindow):
         self.checking = False
         self.scanning=False
         self.reconnecting=set()
+        from usb_transport import UsbConnections
+        self.usb=UsbConnections()
+        self.usb_scanning=False
+        self.usb_timer=QTimer(self);self.usb_timer.setInterval(3000);self.usb_timer.timeout.connect(self.check_usb_connection)
+        if auto_checks:self.usb_timer.start()
         self.setStyleSheet(THEME)
         from studio import Studio
         self.studio=Studio(self);self.setCentralWidget(self.studio)
         menu=self.menuBar()
-        devices_menu=menu.addMenu("Устройства");devices_menu.addAction("Найти телефоны",self.scan_devices);devices_menu.addAction("Подключиться по IP",self.manual);devices_menu.addAction("Доверенные телефоны",self.trusted_devices)
+        devices_menu=menu.addMenu("Устройства");devices_menu.addAction("Найти телефоны",self.scan_devices);devices_menu.addAction("Подключиться по USB",self.connect_usb);devices_menu.addAction("Подключиться по IP",self.manual);devices_menu.addAction("Доверенные телефоны",self.trusted_devices)
         view_menu=menu.addMenu("Вид");view_menu.addAction("Показать / скрыть телефоны",lambda:self.devices_button.click())
         for i,title in enumerate(("Монитор","Камера","Продакшн","Материалы")):view_menu.addAction(title,lambda checked=False,n=i:self.studio.navigate(n))
         system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True))
@@ -562,19 +607,20 @@ class Window(QMainWindow):
         while self.device_cards_layout.count():
             item=self.device_cards_layout.takeAt(0)
             if item.widget():item.widget().hide();item.widget().deleteLater()
-        entries=list(self.devices);known={d['host'] for d in entries}
+        entries=list(self.devices);known={(d['host'],d.get('port',39812)) for d in entries}
         for tile in self.tiles:
-            if tile.client.host not in known:entries.append(dict(host=tile.client.host,name=tile.name.text(),fingerprint=getattr(tile.client,'fingerprint','')))
+            if (tile.client.host,getattr(tile.client,'port',39812)) not in known:entries.append(dict(host=tile.client.host,port=getattr(tile.client,'port',39812),transport=getattr(tile.client,'transport','lan'),name=tile.name.text(),fingerprint=getattr(tile.client,'fingerprint','')))
         self.device_state_labels={}
         if not entries:
             label=QLabel("Телефоны пока не найдены.\nВключите камеру и нажмите «Найти».\nЕсли поиск недоступен, подключитесь по IP.");label.setWordWrap(True);self.device_cards_layout.addWidget(label)
         for device in entries:
             card=QFrame();card.setObjectName("tile");box=QVBoxLayout(card)
             name=QLabel(device['name']);name.setWordWrap(True);name.setStyleSheet("font-size:13px;font-weight:600");box.addWidget(name)
-            state=QLabel(device['host']);state.setObjectName('muted');box.addWidget(state);self.device_state_labels[device['host']]=state
-            connected=next((t for t in self.tiles if t.client.host==device['host']),None)
+            state=QLabel('USB · кабель' if device.get('transport')=='usb' else device['host']);state.setObjectName('muted');box.addWidget(state);self.device_state_labels[(device['host'],device.get('port',39812))]=state
+            connected=next((t for t in self.tiles if t.client.host==device['host'] and getattr(t.client,'port',39812)==device.get('port',39812)),None)
             button=QPushButton("Управление" if connected else "Подключить");button.setObjectName("navigation" if connected else "primary")
             if connected:button.clicked.connect(lambda checked=False,t=connected:(self.studio.select(t),self.studio.navigate(1)))
+            elif device.get('transport')=='usb':button.clicked.connect(lambda checked=False,d=device:self.begin_connect(d['host'],d['name'],d['fingerprint'],port=d['port'],transport='usb'))
             else:button.clicked.connect(lambda checked=False,d=device:self.begin_connect(d['host'],d['name'],d['fingerprint']))
             box.addWidget(button);self.device_cards_layout.addWidget(card)
 
@@ -615,12 +661,57 @@ class Window(QMainWindow):
         ip, ok = QInputDialog.getText(self,"Подключение по IP","IPv4-адрес из Android-приложения:")
         if ok and ip.strip(): self.begin_connect(ip.strip(),ip.strip())
 
-    def begin_connect(self, host, name, announced=""):
-        if any(tile.client.host == host for tile in self.tiles):
+    def restore_usb(self,devices):
+        restored=set()
+        for device in devices:
+            for tile in self.tiles:
+                if getattr(tile.client,'transport','lan')=='usb' and getattr(tile.client,'usb_serial','')==device['serial']:
+                    if tile.client.port!=device['port'] or tile.failures:
+                        tile.client.port=device['port'];tile.poll_wake.set()
+                    restored.add(device['serial'])
+        return restored
+
+    def check_usb_connection(self):
+        if self.usb_scanning or not any(getattr(t.client,'transport','lan')=='usb' and t.failures for t in self.tiles):return
+        self.usb_scanning=True
+        def done(devices):self.usb_scanning=False;self.restore_usb(devices)
+        def failed(message):self.usb_scanning=False
+        self.run(self.usb.discover,done,failed)
+
+    def connect_usb(self):
+        if self.usb_scanning:return
+        self.usb_scanning=True;self.hint.setText('Ищем телефон по USB…')
+        def done(devices):
+            self.usb_scanning=False
+            if len(devices)==1:item=devices[0]
+            else:
+                labels=[d['name']+' · '+d['serial'] for d in devices]
+                choice,ok=QInputDialog.getItem(self,'USB','Телефон:',labels,0,False)
+                if not ok:return
+                item=devices[labels.index(choice)]
+            self.hint.setText('USB: Wi-Fi не требуется. Включите Camera Deck на телефоне.')
+            if item['serial'] in self.restore_usb(devices):return
+            self.begin_connect(item['host'],item['name'],port=item['port'],transport='usb',serial=item['serial'])
+        def failed(message):self.usb_scanning=False;self.hint.setText(message)
+        self.run(self.usb.discover,done,failed)
+
+    def begin_connect(self, host, name, announced="", *, port=39812, transport='lan',serial=''):
+        if any(tile.client.host == host and getattr(tile.client,'port',39812)==port for tile in self.tiles):
             self.message("Подключение","Этот телефон уже подключён."); return
-        try: client = CameraClient(host)
+        try: client = CameraClient(host,port=port,transport=transport)
         except ValueError as exc: self.message("Адрес",str(exc)); return
+        client.usb_serial=serial
         def confirm(fp):
+            if any(getattr(t.client,'fingerprint','')==fp for t in self.tiles):
+                self.message('Подключение','Этот телефон уже подключён. Отключите его текущий сеанс перед сменой Wi-Fi / USB.');return
+            if transport=='usb' and not getattr(client,'usb_resume_attempted',False):
+                client.usb_resume_attempted=True
+                try:entry=next((v for v in trusted.load().values() if v.get('fingerprint')==fp),None)
+                except Exception:entry=None
+                if entry:
+                    def resumed(result):
+                        client.identity=result.get('id','');self.tiles.append(CameraTile(self,client,result.get('name',name)));self.rebuild()
+                    self.run(lambda:client.resume(entry['secret']),resumed,lambda message:confirm(fp));return
             if announced and fp != announced:
                 self.message("Сертификат","Отпечаток из поиска отличается от сертификата. Повторите подключение по IP и сравните отпечаток на телефоне."); return
             formatted = " ".join(fp[i:i+8] for i in range(0,len(fp),8))
@@ -734,9 +825,10 @@ class Window(QMainWindow):
                 if candidate.is_file():updates.restart_with_update(candidate,self.available)
             except Exception as exc:self.message("Обновление",str(exc))
         self.save_preferences()
-        self.timer.stop();self.discovery_timer.stop();self.studio.timer.stop();self.studio.media.epoch+=1
+        self.timer.stop();self.discovery_timer.stop();self.usb_timer.stop();self.studio.timer.stop();self.studio.media.epoch+=1
         if hasattr(self,"studio"):self.studio.media.player.stop()
         for tile in self.tiles: tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close()
+        threading.Thread(target=self.usb.close,name='camera-usb-cleanup',daemon=False).start()
         event.accept()
 
     def changeEvent(self,event):

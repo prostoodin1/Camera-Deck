@@ -169,7 +169,7 @@ public class CameraService extends Service {
         @Override public Response serve(IHTTPSession s) {
             try {
                 InetAddress remote = InetAddress.getByName(s.getRemoteIpAddress());
-                if (!remote.isSiteLocalAddress() && !remote.isLinkLocalAddress()) return error(Response.Status.FORBIDDEN, "Local network only");
+                if (!remote.isSiteLocalAddress() && !remote.isLinkLocalAddress() && !remote.isLoopbackAddress()) return error(Response.Status.FORBIDDEN, "Local network / USB only");
                 String uri = s.getUri();
                 if(uri.equals("/resume")&&s.getMethod()==Method.POST){
                     String owner=trusted.authenticate(body(s).optString("rememberToken"));

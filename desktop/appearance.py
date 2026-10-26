@@ -28,23 +28,18 @@ class SliderField(QWidget):
 
 
 class GlassSheet(QDialog):
-    """A frozen, blurred view of the actual desk behind legible popup controls."""
+    """Opaque camera controls without framebuffer capture or blur."""
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Dialog|Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.back=QLabel(self);self.back.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        blur=QGraphicsBlurEffect(self.back);blur.setBlurRadius(28);self.back.setGraphicsEffect(blur)
-        self.back.lower()
+        self.back.hide()
     def showEvent(self,event):
-        parent=self.parentWidget()
-        if parent:
-            pix=parent.grab();origin=parent.mapFromGlobal(self.mapToGlobal(QPoint()))
-            self.back.setPixmap(pix.copy(origin.x(),origin.y(),self.width(),self.height()))
-        self.back.setGeometry(self.rect());self.back.lower();super().showEvent(event)
+        super().showEvent(event)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor(22,22,22,238));p.setPen(QPen(QColor(255,255,255,45),1));p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),22,22);p.end()
+        p.setBrush(QColor('#111111'));p.setPen(QPen(QColor('#454545'),1));p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),5,5);p.end()
 
 
 class Toggle(QCheckBox):
@@ -229,3 +224,19 @@ class Viewfinder(QLabel):
         for x,y,dx,dy in ((12,42,1,1),(self.width()-12,42,-1,1),(12,self.height()-43,1,-1),(self.width()-12,self.height()-43,-1,-1)):
             painter.drawLine(x,y,x+dx*12,y);painter.drawLine(x,y,x,y+dy*12)
         painter.end()
+
+# Compact camera-console roles, deliberately opaque for fast popup rendering.
+THEME += """
+QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#070707;color:#eeeeee}
+QFrame#surface,QWidget#surface,QWidget#tile {background:#111111;border:1px solid #303030;border-radius:4px}
+QPushButton {background:#171717;border:1px solid #363636;border-radius:4px;padding:5px 9px;min-height:18px}
+QPushButton:hover {background:#252525;border-color:#ffd24a;color:#ffd24a}
+QPushButton#readout {background:#101010;border:1px solid #393939;border-radius:3px;color:#ffd24a;font-family:Consolas;font-size:13px;padding:6px 8px}
+QPushButton#primary {background:#ffd24a;color:#070707;border:1px solid #ffd24a}
+QPushButton#navigation:checked {background:#171717;color:#ffd24a;border-bottom:2px solid #ffd24a}
+QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#101010;border:1px solid #363636;border-radius:3px;color:#ffd24a}
+QMenuBar,QMenu {background:#101010;color:#eeeeee}
+QTabBar::tab:selected {background:#202020;color:#ffd24a;border-bottom:2px solid #ffd24a}
+"""
+
+THEME += "QWidget#deviceCards {background:#111111} QSplitter::handle {background:#070707} QLabel#emptyMonitor {background:#101010} QScrollArea {background:#070707}"

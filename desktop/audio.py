@@ -5,6 +5,13 @@ import threading
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
 
+def convert_pcm(chunk,converter):
+    if converter is None:return chunk
+    import av
+    frame=av.AudioFrame(format='s16',layout='mono',samples=len(chunk)//2)
+    frame.planes[0].update(chunk);frame.sample_rate=48000
+    return b''.join(bytes(f.planes[0])[:f.samples*len(f.layout.channels)*f.format.bytes] for f in converter.resample(frame))
+
 
 class AudioMonitor(QObject):
     failed=pyqtSignal(str)
@@ -17,14 +24,39 @@ class AudioMonitor(QObject):
         self.timer=QTimer(self); self.timer.timeout.connect(self.pump)
         self.connection=None
         self.generation=0
+        self.device_id=b'';self.volume=1.0
+        self.converter=None
+        self.frame_bytes=2
+        self.devices=QMediaDevices(self);self.devices.audioOutputsChanged.connect(self.outputs_changed)
+
+    def configure_output(self,device_id=b'',volume=1.0):
+        active=self.sink is not None
+        self.stop();self.device_id=bytes(device_id);self.volume=max(0.0,min(1.0,float(volume)))
+        if active:self.start()
+
+    def outputs_changed(self):
+        if self.sink is None:return
+        try:self.configure_output(self.device_id,self.volume)
+        except Exception as error:self.failed.emit(str(error))
 
     def start(self):
         if self.sink is not None:return
         device=QMediaDevices.defaultAudioOutput()
+        if self.device_id:
+            device=next((d for d in QMediaDevices.audioOutputs() if bytes(d.id())==self.device_id),None)
+            if device is None:raise RuntimeError('Выбранный выход звука отключён. Выберите другой выход.')
         if device.isNull():raise RuntimeError("Не найдено устройство воспроизведения звука Windows")
         fmt=QAudioFormat();fmt.setSampleRate(48000);fmt.setChannelCount(1);fmt.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-        if not device.isFormatSupported(fmt):raise RuntimeError("Устройство вывода не поддерживает PCM 48 кГц mono / 16 бит")
-        self.sink=QAudioSink(device,fmt,self);self.sink.setBufferSize(9600)
+        self.converter=None
+        if not device.isFormatSupported(fmt):
+            import av
+            fmt=device.preferredFormat()
+            layouts={1:'mono',2:'stereo',4:'quad',6:'5.1',8:'7.1'}
+            formats={QAudioFormat.SampleFormat.UInt8:'u8',QAudioFormat.SampleFormat.Int16:'s16',QAudioFormat.SampleFormat.Int32:'s32',QAudioFormat.SampleFormat.Float:'flt'}
+            if fmt.channelCount() not in layouts or fmt.sampleFormat() not in formats or not device.isFormatSupported(fmt):raise RuntimeError('Устройство вывода сообщает неподдерживаемый формат')
+            self.converter=av.AudioResampler(format=formats[fmt.sampleFormat()],layout=layouts[fmt.channelCount()],rate=fmt.sampleRate())
+        self.frame_bytes=fmt.bytesPerFrame()
+        self.sink=QAudioSink(device,fmt,self);self.sink.setBufferSize(max(9600,fmt.bytesForDuration(100000)));self.sink.setVolume(self.volume)
         self.output=self.sink.start()
         if self.output is None:self.stop();raise RuntimeError("Не удалось включить воспроизведение звука")
         self.stop_event=threading.Event(); self.generation+=1
@@ -34,6 +66,7 @@ class AudioMonitor(QObject):
 
     def receive(self,generation,event):
         conn=None
+        converter=self.converter
         try:
             conn=self.client.connection()  # certificate verified before token is sent
             if event.is_set():return
@@ -53,6 +86,8 @@ class AudioMonitor(QObject):
                 if not chunk:raise ConnectionError("Телефон завершил передачу звука")
                 if len(chunk)%2:raise ValueError("Повреждённый PCM-поток")
                 if event.is_set():return
+                chunk=convert_pcm(chunk,converter)
+                if not chunk:continue
                 try:self.chunks.put_nowait((generation,chunk))
                 except queue.Full:
                     try:self.chunks.get_nowait()
@@ -74,7 +109,7 @@ class AudioMonitor(QObject):
                 if generation==self.generation:self.pending=data
             except queue.Empty:return
         count=min(len(self.pending),self.sink.bytesFree())
-        count-=count%2
+        count-=count%self.frame_bytes
         if count:
             written=self.output.write(self.pending[:count])
             if written>0:self.pending=self.pending[written:]
@@ -91,7 +126,7 @@ class AudioMonitor(QObject):
             conn.close()
         self.connection=None
         if self.sink is not None:self.sink.stop();self.sink.deleteLater()
-        self.sink=None;self.output=None;self.pending=b""
+        self.sink=None;self.output=None;self.pending=b"";self.converter=None
         while True:
             try:self.chunks.get_nowait()
             except queue.Empty:break

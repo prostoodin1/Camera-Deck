@@ -7,10 +7,13 @@ import android.widget.Button;
 
 /** Shared visual roles; yellow is selection, red is recording, white is content. */
 final class CameraDesign {
-    static final int BLACK=0xff080a0c,PANEL=0xff15181c,LINE=0xff30353c,TEXT=0xffeef0f3,MUTED=0xff969da7,ACCENT=0xffffd76b,RECORD=0xfff05252;
+    static final int BLACK=0xff070707,PANEL=0xff141414,LINE=0xff333333,TEXT=0xffeeeeee,MUTED=0xff999999,ACCENT=0xffffd24a,RECORD=0xfff05252;
     static int dp(Context c,int v){return Math.round(v*c.getResources().getDisplayMetrics().density);}
     static GradientDrawable surface(Context c,int fill,int line,int radius){GradientDrawable d=new GradientDrawable();d.setColor(fill);d.setCornerRadius(dp(c,radius));if(line!=0)d.setStroke(dp(c,1),line);return d;}
     static void button(Button b,boolean primary){
+        b.setAlpha(b.isEnabled()?1:.38f);
+        if(Boolean.valueOf(primary).equals(b.getTag()))return;
+        b.setTag(primary);
         b.setTextColor(primary?BLACK:TEXT);
         StateListDrawable states=new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed},surface(b.getContext(),primary?0xffffe8a5:0xff343a43,0,8));
@@ -23,7 +26,7 @@ final class CameraDesign {
         final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
         boolean recording,photo=true;
         Shutter(Context c){super(c);setBackgroundColor(Color.TRANSPARENT);setContentDescription("Снять фотографию");}
-        void state(boolean photo,boolean recording){this.photo=photo;this.recording=recording;setContentDescription(photo?"Снять фотографию":recording?"Остановить запись":"Начать запись");invalidate();}
+        void state(boolean photo,boolean recording){if(this.photo==photo&&this.recording==recording)return;this.photo=photo;this.recording=recording;setContentDescription(photo?"Снять фотографию":recording?"Остановить запись":"Начать запись");invalidate();}
         @Override protected void onDraw(Canvas canvas){
             float x=getWidth()/2f,y=getHeight()/2f,r=Math.min(getWidth(),getHeight())*.42f;
             paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(getContext(),2));paint.setColor(isEnabled()?TEXT:MUTED);canvas.drawCircle(x,y,r,paint);

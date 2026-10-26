@@ -1,6 +1,8 @@
 # Camera Deck · Slate
 
-Android cameras controlled from a Windows operator desk. **Slate 0.9.1 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical phone, Wi-Fi and USB validation remains necessary. Shipping a signed auto-update requires the existing Aurora APK and update signing identities; a CI/debug APK is not an update for an installed public build.
+Android cameras controlled from a Windows operator desk. **Slate 0.10.0 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new USB/audio/screen features remains necessary. Shipping a signed auto-update requires the existing Aurora APK and update signing identities; a CI/debug APK is not an update for an installed public build.
+
+0.10 adds USB cable connection without Wi-Fi (Android USB debugging and computer authorization required), phone audio-input selection, independent Windows audio-output/volume selection, keep-screen-on during foreground recording, and compact black/yellow controls. See [setup, validation and limitations](docs/SLATE-USB-AUDIO.ru.md). [Windows test-stand screenshots](docs/screenshots/slate-usb-audio/) use explicitly labelled simulators.
 
 ## Start
 

@@ -28,6 +28,7 @@ class Studio(QWidget):
         side=QVBoxLayout(window.sidebar);side.setContentsMargins(12,14,12,12);side.addWidget(QLabel('УСТРОЙСТВА'))
         actions=QHBoxLayout();window.scan=QPushButton('Найти');window.scan.clicked.connect(window.scan_devices);actions.addWidget(window.scan)
         manual=QPushButton('По IP');manual.clicked.connect(window.manual);actions.addWidget(manual);side.addLayout(actions)
+        usb=QPushButton('USB · кабель');usb.clicked.connect(window.connect_usb);side.addWidget(usb)
         window.device_list=QComboBox();window.device_list.setPlaceholderText('Выберите телефон');side.addWidget(window.device_list)
         connect=QPushButton('Подключить');connect.setObjectName('primary');connect.clicked.connect(window.connect_device);side.addWidget(connect)
         window.device_cards=QWidget();window.device_cards.setObjectName("deviceCards");window.device_cards.setAttribute(Qt.WidgetAttribute.WA_StyledBackground);window.device_cards_layout=QVBoxLayout(window.device_cards);window.device_cards_layout.setContentsMargins(0,8,0,8);window.device_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -74,6 +75,7 @@ class Studio(QWidget):
         self.group=QLineEdit();self.group.setPlaceholderText('Группа камеры');self.group.editingFinished.connect(self.change_group);form.addWidget(self.group)
         self.view=Toggle('Предпросмотр');self.view.toggled.connect(lambda value:self.selected and self.selected.view_toggle.setChecked(value));form.addWidget(self.view)
         self.audio=Toggle('Слушать микрофон');self.audio.toggled.connect(lambda value:self.selected and self.selected.listen.setChecked(value));form.addWidget(self.audio)
+        audio_route=QPushButton('Источник / выход звука');audio_route.clicked.connect(lambda:self.selected and self.selected.audio_settings());form.addWidget(audio_route)
         rotate=QPushButton('Повернуть 90°');rotate.clicked.connect(lambda:self.selected and self.selected.rotate_picture());form.addWidget(rotate)
         self.lock=Toggle('Блокировка поворота');self.lock.toggled.connect(lambda value:self.selected and self.selected.lock_rotation(value));form.addWidget(self.lock)
         form.addStretch();self.inspector.setWidget(panel);self.split.addWidget(self.inspector);self.inspector.hide();self.split.setStretchFactor(1,1);self.split.setSizes([230,900,280])
@@ -154,8 +156,8 @@ class Studio(QWidget):
             if not self.group.hasFocus():self.group.setText(self.selected.group.text())
             for control,value in [(self.view,self.selected.view_toggle.isChecked()),(self.audio,self.selected.listen.isChecked()),(self.lock,self.selected.rotation.locked_base is not None)]:control.blockSignals(True);control.setChecked(value);control.blockSignals(False)
         for tile in tiles:
-            label=getattr(self.window,'device_state_labels',{}).get(tile.client.host)
-            if label:label.setText(('Нет связи' if tile.failures else '● Запись' if tile.status.get('recording') else 'Подключён')+' · '+tile.client.host)
+            label=getattr(self.window,'device_state_labels',{}).get((tile.client.host,getattr(tile.client,'port',39812)))
+            if label:label.setText(('Нет связи' if tile.failures else '● Запись' if tile.status.get('recording') else 'Подключён')+' · '+('USB' if getattr(tile.client,'transport','lan')=='usb' else tile.client.host))
         self.table.setRowCount(len(tiles))
         for row,tile in enumerate(tiles):
             s=tile.status;elapsed=int(s.get('recordingElapsedMs',0)/1000);free=s.get('storageFreeBytes',-1)
