@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget
 from main import Window,CameraTile
 from protocol import CameraClient
 from updates import VERSION,VERSION_CODE
+import updates
 
 
 def fixture(index):
@@ -115,6 +116,8 @@ def handler(state):
 
 
 def main():
+    demo_data=tempfile.TemporaryDirectory(prefix='camera-deck-demo-settings-')
+    updates.DATA=Path(demo_data.name)
     app=QApplication([])
     font=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts/segoeui.ttf"
     if font.is_file():QFontDatabase.addApplicationFont(str(font))
@@ -174,6 +177,7 @@ def main():
         result=app.exec()
         for server in servers:server.shutdown();server.server_close()
     print(json.dumps({"screenshots":[str(p) for p in sorted(out.glob("*.png"))],"realPhonesTested":False,"tlsPairingAndJpegTransferTested":True},ensure_ascii=False))
+    demo_data.cleanup()
     return result
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
-from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
+from PyQt6.QtMultimedia import QAudio, QAudioFormat, QAudioSink, QMediaDevices
 
 
 class AudioMonitor(QObject):
@@ -38,8 +38,12 @@ class AudioMonitor(QObject):
             conn=self.client.connection()  # certificate verified before token is sent
             if event.is_set():return
             self.connection=conn
-            conn.request("GET","/audio",headers={"Authorization":"Bearer "+self.client.token})
+            token=self.client.token
+            conn.request("GET","/audio",headers={"Authorization":"Bearer "+token})
             response=conn.getresponse()
+            if response.status==401 and getattr(self.client,'refresh_secret',''):
+                self.client.renew(token)
+                raise ConnectionError('Сеанс звука обновлён; переподключаемся')
             if response.status!=200:
                 raise ConnectionError("Микрофон телефона недоступен: "+response.read(1024).decode(errors="replace"))
             if response.getheader("X-Audio-Encoding")!="pcm-s16le" or response.getheader("X-Audio-Rate")!="48000" or response.getheader("X-Audio-Channels")!="1":
@@ -62,6 +66,8 @@ class AudioMonitor(QObject):
 
     def pump(self):
         if self.sink is None or self.output is None:return
+        if self.sink.error() not in (QAudio.Error.NoError,QAudio.Error.UnderrunError):
+            self.failed.emit('Устройство воспроизведения недоступно');return
         if not self.pending:
             try:
                 generation,data=self.chunks.get_nowait()

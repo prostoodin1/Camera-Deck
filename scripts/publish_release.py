@@ -18,7 +18,7 @@ import updates
 
 def main():
     version=json.loads((project/"version.json").read_text())
-    tag="camera-deck-v"+version["version"]
+    tag="camera-deck-slate-v"+version["version"]
     token=updates.github_token()
     def request(path,method="GET",body=None):
         data=None if body is None else json.dumps(body).encode()
@@ -43,7 +43,7 @@ def main():
     envelope=(out/"camera-deck-update.json").read_bytes()
     manifest=updates.verify_envelope(envelope,current_code=0)
     if manifest["code"]!=version["code"]: raise RuntimeError("Release version mismatch")
-    for platform in ("android","windows"):
+    for platform in ("android","windows","windowsPortable"):
         artifact=out/manifest[platform]["name"]
         with artifact.open("rb") as f: digest=hashlib.file_digest(f,"sha256").hexdigest()
         if digest!=manifest[platform]["sha256"] or artifact.stat().st_size!=manifest[platform]["size"]:

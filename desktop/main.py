@@ -106,6 +106,7 @@ class CameraTile(QWidget):
         self.listen.toggled.connect(self.sync_audio)
         switches.addWidget(self.listen);switches.addStretch();self.rotation_lock=self.rotation_controls(switches);box.addLayout(switches)
         self.monitor=AudioMonitor(client,self);self.monitor.failed.connect(self.audio_failed)
+        self.audio_retry=QTimer(self);self.audio_retry.setSingleShot(True);self.audio_retry.setInterval(2000);self.audio_retry.timeout.connect(self.sync_audio)
         self.phone_update = QPushButton("Обновить Android")
         self.phone_update.setEnabled(False)
         self.phone_update.setVisible(False)
@@ -151,6 +152,7 @@ class CameraTile(QWidget):
         self.window.run(work)
 
     def set_preview_active(self, visible):
+        self.monitor_allowed=visible or self.fullscreen is not None
         if (visible or self.fullscreen is not None) and self.view_toggle.isChecked():
             self.preview_enabled.set()
         else:
@@ -159,11 +161,13 @@ class CameraTile(QWidget):
         self.sync_audio()
 
     def audio_failed(self,message):
-        self.listen.setChecked(False);self.monitor.stop()
-        self.window.message("Звук",message)
+        self.monitor.stop()
+        self.info.setText('Звук: '+message+' · повторное подключение автоматически')
+        self.audio_retry.start()
 
     def sync_audio(self):
-        if self.listen.isChecked() and self.preview_enabled.is_set() and not self.stopped.is_set():
+        self.audio_retry.stop()
+        if self.listen.isChecked() and getattr(self,'monitor_allowed',True) and not self.stopped.is_set():
             try:self.monitor.start()
             except Exception as exc:self.audio_failed(str(exc))
         else:self.monitor.stop()
@@ -270,6 +274,7 @@ class CameraTile(QWidget):
         self.info.setText(explain(message)[0]+" Проверьте состояние записи на телефоне.");self.info.setToolTip(message)
         self.video.setText("Нет актуального изображения")
         self.photo.setEnabled(False); self.record.setEnabled(False)
+        self.mode.setEnabled(False);self.phone_update.setEnabled(False)
 
     def show_frame(self, data, status):
         if not self.preview_enabled.is_set(): return
@@ -303,6 +308,7 @@ class CameraTile(QWidget):
         self.info.setText(status.get('error') or f"{self.client.host}  /  REC {status.get('videoWidth',1920)}×{status.get('videoHeight',1080)} {status.get('videoFps',30)}p  /  {'AAC' if status.get('audio') else 'MUTE'}  /  {self.transport} {self.measured_fps:.0f} fps")
         free=status.get("storageFreeBytes",-1)
         if free>=0:self.info.setText(f"{self.transport} · {self.measured_fps:.0f} fps  /  {status.get('storageName','Телефон')} · {free/1073741824:.1f} ГБ свободно"+("  ·  "+status['error'] if status.get('error') else ""))
+        if status.get('audioWarning'):self.info.setText(self.info.text()+' · '+status['audioWarning'])
         self.info.setToolTip(status.get("lastFile", ""))
         if not status.get("auroraUpdates",False):
             self.phone_update.setEnabled(False); self.phone_update.hide()
@@ -507,7 +513,13 @@ class Window(QMainWindow):
         self.columns.setCurrentIndex(max(0,min(2,preferences.get('columns',1))))
 
     def load_preferences(self):
-        try: return json.loads((updates.DATA/"preferences.json").read_text())
+        try:
+            data=json.loads((updates.DATA/"preferences.json").read_text())
+            if not isinstance(data,dict):return {}
+            types={'autoUpdates':bool,'geometry':str,'columns':int,'selectedCamera':str,'cameraGroups':dict}
+            result={k:v for k,v in data.items() if k in types and type(v) is types[k]}
+            if 'cameraGroups' in result:result['cameraGroups']={k:v for k,v in result['cameraGroups'].items() if isinstance(k,str) and isinstance(v,str)}
+            return result
         except (OSError,ValueError): return {}
 
     def save_preferences(self):
@@ -645,7 +657,7 @@ class Window(QMainWindow):
         self.run(client.probe,confirm)
 
     def remove(self,tile):
-        if self.studio.pc_jobs.get(id(tile),{}).get('state') in ('starting','recording'):
+        if self.studio.pc_jobs.get(id(tile),{}).get('state') in ('starting','recording','recovering'):
             self.message('Запись на ПК','Сначала остановите запись и дождитесь готового файла. Затем камеру можно отключить от пульта.');return
         self.studio.pc_jobs.pop(id(tile),None);self.studio.results.pop(id(tile),None)
         if tile.fullscreen is not None:tile.fullscreen.close()
@@ -688,7 +700,7 @@ class Window(QMainWindow):
         self.update_label.setText("Готово обновление " + result["version"]+" · установится при закрытии пульта")
         self.install_button.setEnabled(True)
 
-    def is_recording(self): return any(j.get("state") in ("starting","recording") for j in self.studio.pc_jobs.values()) or any(not tile.status or tile.status.get("recording") or tile.failures for tile in self.tiles)
+    def is_recording(self): return any(j.get("state") in ("starting","recording","recovering") for j in self.studio.pc_jobs.values()) or any(not tile.status or tile.status.get("recording") or tile.failures for tile in self.tiles)
 
     def install_windows(self):
         if self.is_recording(): self.message("Обновление","Остановите запись и восстановите связь со всеми камерами перед перезапуском."); return
@@ -736,7 +748,10 @@ class Window(QMainWindow):
 
 def main():
     self_test = len(sys.argv) == 3 and sys.argv[1] == "--self-test"
-    if self_test: os.environ["QT_QPA_PLATFORM"]="offscreen"
+    if self_test:
+        os.environ["QT_QPA_PLATFORM"]="offscreen"
+        out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
+        updates.DATA=out/'self-test-data'
     app=QApplication(sys.argv)
     font_file=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts"/"segoeui.ttf"
     if font_file.is_file(): QFontDatabase.addApplicationFont(str(font_file))
@@ -744,7 +759,6 @@ def main():
     window=Window(auto_checks=not self_test); window.show()
     if self_test:
         app.processEvents()
-        out=Path(sys.argv[2]); out.mkdir(parents=True,exist_ok=True)
         assert window.empty.isVisible() and window.device_list.count()==0
         assert window.grab().save(str(out/"windows-preview.png"))
         (out/"windows-self-test.json").write_text(json.dumps({"version":updates.VERSION,"rendered":True,"hardwareTested":False}))

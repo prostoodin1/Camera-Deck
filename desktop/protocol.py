@@ -40,7 +40,7 @@ def discover(seconds: float = 2.0) -> list[dict]:
                 network = ipaddress.ip_network(f"{interface['IPAddress']}/{interface['PrefixLength']}", strict=False)
                 if network.is_private and not network.is_loopback:
                     targets.add(str(network.broadcast_address))
-        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
             pass
         for target in targets:
             try:
@@ -52,8 +52,9 @@ def discover(seconds: float = 2.0) -> list[dict]:
             try:
                 data, (host, _) = sock.recvfrom(4096)
                 item = json.loads(data)
+                if not isinstance(item,dict):continue
                 fp = item.get("fingerprint", "")
-                if item.get("protocol") != 1 or len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
+                if item.get("protocol") != 1 or not isinstance(fp,str) or len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
                     continue
                 if item.get("port") != 39812 or not isinstance(item.get("id"), str):
                     continue
@@ -183,6 +184,7 @@ class CameraClient:
         if target.exists():
             raise FileExistsError(f"Файл уже существует: {filename}")
         partial = target.with_suffix(target.suffix + ".partial")
+        owns_partial=False
         conn = self.connection()
         try:
             conn.request("GET", "/file?" + urlencode({"name": filename}), headers={"Authorization": "Bearer " + self.token})
@@ -194,6 +196,7 @@ class CameraClient:
                 raise ValueError("Неизвестный размер файла")
             count = 0
             with partial.open("xb") as out:
+                owns_partial=True
                 while chunk := response.read(256 * 1024):
                     out.write(chunk)
                     count += len(chunk)
@@ -202,10 +205,11 @@ class CameraClient:
             if count != expected:
                 raise ValueError("Файл скачан не полностью")
             partial.rename(target)
+            owns_partial=False
             return target
         finally:
             conn.close()
-            partial.unlink(missing_ok=True)
+            if owns_partial:partial.unlink(missing_ok=True)
 
     def send_update(self, apk: Path, envelope: bytes) -> None:
         import base64

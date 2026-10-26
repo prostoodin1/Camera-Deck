@@ -17,8 +17,10 @@ final class RecordingRelay extends InputStream {
     final long created;
     volatile boolean ended,closed,begun;
     volatile String error="";
+    final String sessionId=UUID.randomUUID().toString();
+    volatile String recordingName="",backupState="starting";
     RecordingRelay()throws Exception{this(SystemClock::elapsedRealtime);}
-    RecordingRelay(java.util.function.LongSupplier clock)throws Exception{this.clock=clock;created=clock.getAsLong();json(0,new JSONObject().put("protocol",1).put("phoneBackup",true));}
+    RecordingRelay(java.util.function.LongSupplier clock)throws Exception{this.clock=clock;created=clock.getAsLong();json(0,new JSONObject().put("protocol",1).put("phoneBackup",true).put("sessionId",sessionId));}
     synchronized void add(byte[] message){
         if(ended||closed)return;
         if(message.length>MAX_PACKET||bytes+message.length>MAX_BYTES){finish("Сеть не успевает. Запись на телефоне продолжается.");return;}
@@ -27,7 +29,7 @@ final class RecordingRelay extends InputStream {
     static byte[] envelope(int type,byte[] data){ByteBuffer b=ByteBuffer.allocate(data.length+5);b.putInt(data.length+1).put((byte)type).put(data);return b.array();}
     void json(int type,JSONObject object){add(envelope(type,object.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));}
     void format(MediaFormat video,MediaFormat audio,int rotation)throws Exception{
-        begun=true;JSONObject object=new JSONObject().put("video",describe(video)).put("rotation",rotation);
+        begun=true;JSONObject object=new JSONObject().put("video",describe(video)).put("rotation",rotation).put("recordingName",recordingName);
         if(audio!=null)object.put("audio",describe(audio));json(1,object);
     }
     static JSONObject describe(MediaFormat f)throws Exception{

@@ -18,10 +18,12 @@ final class AvRecorder implements AutoCloseable {
     final AudioEngine microphone;
     final boolean withAudio;
     final boolean realtimeTimestamps;
-    final ArrayBlockingQueue<AudioPacket> pcm=new ArrayBlockingQueue<>(30);
+    final LatestQueue<AudioPacket> pcm=new LatestQueue<>(30);
     final List<Sample> pending=new ArrayList<>();
     volatile boolean finishing, started, released;
     volatile String error="";
+    volatile String audioWarning="";
+    volatile int audioDroppedChunks,microphoneGaps;
     volatile long originNs;
     Thread videoThread,audioThread;
     volatile int videoTrack=-1,audioTrack=-1;int pendingBytes;
@@ -90,8 +92,10 @@ final class AvRecorder implements AutoCloseable {
     }
     void offerAudio(byte[] data,long endNs) {
         if(finishing || !started) return;
-        if(!pcm.offer(new AudioPacket(data,endNs))) failAudio("Audio encoder cannot keep up");
+        if(pcm.offerLatest(new AudioPacket(data,endNs))){audioDroppedChunks++;audioWarning="Аудиокодер отстаёт: пропущены старые аудиоблоки";}
     }
+    void microphoneGap(String message){microphoneGaps++;audioWarning="Микрофон восстанавливается; временно тишина: "+message;}
+    void microphoneRecovered(){if(microphoneGaps>0)audioWarning="Микрофон восстановлен. Сбоев микрофона: "+microphoneGaps;}
     void failAudio(String message) { if(error.isEmpty()) error="Audio: "+message; }
     void drainVideo() {
         MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
@@ -110,7 +114,7 @@ final class AvRecorder implements AutoCloseable {
                             if(offsetUs==Long.MIN_VALUE) offsetUs=realtimeTimestamps?originNs/1000:
                                 info.presentationTimeUs-(SystemClock.elapsedRealtimeNanos()-originNs)/1000;
                             long rawPts=info.presentationTimeUs-offsetUs;
-                            if(relay!=null&&rawPts<=lastPts)relay.finish("Кодер выдал переставленные кадры; прямая запись остановлена. Оригинал остаётся на телефоне.");
+                            if(relay!=null&&rawPts>=0&&lastPts>=0&&rawPts<=lastPts)relay.finish("Кодер выдал переставленные кадры; прямая запись остановлена. Оригинал остаётся на телефоне.");
                             long pts=Math.max(lastPts+1,rawPts); lastPts=pts;
                             sample(false,buf,pts,info.flags);
                         }

@@ -10,18 +10,20 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.request
 from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.9.0"
-VERSION_CODE = 13
+VERSION = "0.9.1"
+VERSION_CODE = 14
 RELEASE_NAME = "Slate"
 PRODUCT = "camera-deck-aurora"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 DATA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CameraDeck"
+_download_commit=threading.Lock()
 
 
 class _Blob(ctypes.Structure):
@@ -153,13 +155,16 @@ def download_update(update: dict, platform: str) -> Path:
     folder = DATA / "updates" / str(signed["code"])
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / meta["name"]
-    if target.is_file() and target.stat().st_size == meta["size"]:
-        with target.open("rb") as existing:
-            if hashlib.file_digest(existing, "sha256").hexdigest() == meta["sha256"]:
-                return target
-    temp = target.with_suffix(".partial")
+    def cached():
+        if target.is_file() and target.stat().st_size==meta['size']:
+            with target.open('rb') as existing:return hashlib.file_digest(existing,'sha256').hexdigest()==meta['sha256']
+        return False
+    with _download_commit:
+        if cached():return target
+    fd,temp_name=tempfile.mkstemp(prefix=target.name+'.',suffix='.partial',dir=folder)
+    temp=Path(temp_name)
     try:
-        with github_open(f"/releases/assets/{int(update[platform]['assetId'])}", "", True) as response, temp.open("wb") as output:
+        with os.fdopen(fd,'wb') as output, github_open(f"/releases/assets/{int(update[platform]['assetId'])}", "", True) as response:
             total = 0
             digest = hashlib.sha256()
             while chunk := response.read(262144):
@@ -170,7 +175,8 @@ def download_update(update: dict, platform: str) -> Path:
                 output.write(chunk)
         if total != meta["size"] or digest.hexdigest() != meta["sha256"]:
             raise ValueError("Update download failed signature/hash validation")
-        temp.replace(target)
+        with _download_commit:
+            if not cached():temp.replace(target)
         return target
     finally:
         temp.unlink(missing_ok=True)

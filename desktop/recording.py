@@ -7,6 +7,9 @@ from pathlib import Path
 import shutil
 import struct
 import time
+import re
+import tempfile
+import http.client
 import av
 
 MAX_PACKET=8_000_000
@@ -84,7 +87,7 @@ def receive_original(client,destination,notify):
     partial=destination.with_suffix('.partial.mp4');journal=destination.with_suffix('.recording.json')
     if partial.exists() or journal.exists():raise FileExistsError('Рядом уже есть незавершённая запись')
     if shutil.disk_usage(destination.parent).free<256_000_000:raise OSError('Для начала записи на ПК нужно минимум 256 МБ свободного места')
-    conn=client.connection();mux=None;started=False;last_check=time.monotonic()
+    conn=client.connection();mux=None;started=False;session_id='';backup_name='';last_check=time.monotonic()
     try:
         conn.sock.settimeout(15)
         conn.request('GET','/recording',headers={'Authorization':'Bearer '+client.token})
@@ -92,20 +95,23 @@ def receive_original(client,destination,notify):
         if response.status!=200:raise ConnectionError('Телефон не готов к записи на ПК или требует обновления: HTTP '+str(response.status))
         if response.getheader('Content-Type','').split(';')[0]!='application/x-cameradeck-recording':raise ValueError('Неверный формат оригинального потока')
         kind,hello=message(response)
-        if kind!=0 or json.loads(hello).get('protocol')!=1:raise ValueError('Несовместимый протокол оригинала')
+        hello=json.loads(hello)
+        if kind!=0 or hello.get('protocol')!=1:raise ValueError('Несовместимый протокол оригинала')
+        session_id=hello.get('sessionId','')
         journal.write_text(json.dumps({'state':'starting','phoneBackup':True,'target':destination.name}),encoding='utf-8')
-        client.command('record_start');started=True;notify('starting',{'phoneBackup':True})
+        # A lost reply is ambiguous: recovery checks this session, never sends record_start again.
+        started=True;client.command('record_start');notify('starting',{'phoneBackup':True,'sessionId':session_id})
         while True:
             kind,data=message(response)
             if kind==1:
                 if mux is not None:raise ValueError('Повторная конфигурация дорожек')
-                formats=json.loads(data);mux=OriginalMuxer(partial,formats);journal.write_text(json.dumps({'state':'recording','formats':formats,'phoneBackup':True}),encoding='utf-8')
+                formats=json.loads(data);backup_name=formats.get('recordingName','');mux=OriginalMuxer(partial,formats);journal.write_text(json.dumps({'state':'recording','formats':formats,'phoneBackup':True,'sessionId':session_id}),encoding='utf-8')
             elif kind==2:
                 if mux is None:raise ValueError('Данные получены до конфигурации')
                 mux.sample(data)
                 if time.monotonic()-last_check>1:
                     if shutil.disk_usage(destination.parent).free<64_000_000:raise OSError('На ПК заканчивается место. Резервная запись остаётся на телефоне.')
-                    last_check=time.monotonic();notify('recording',{'bytes':mux.total,'videoPackets':mux.counts.get(0,0)})
+                    last_check=time.monotonic();notify('recording',{'bytes':mux.total,'videoPackets':mux.counts.get(0,0),'sessionId':session_id})
             elif kind==3:
                 end=json.loads(data)
                 if end.get('error'):raise RuntimeError(end['error'])
@@ -114,10 +120,60 @@ def receive_original(client,destination,notify):
             else:raise ValueError('Неизвестный пакет оригинала')
     except Exception as exc:
         if journal.exists():journal.write_text(json.dumps({'state':'interrupted','phoneBackup':True,'error':str(exc),'partial':partial.name}),encoding='utf-8')
+        if started and session_id:
+            if mux is not None:
+                try:mux.close()
+                except Exception:pass
+                mux=None
+            conn.close()
+            return recover_phone_backup(client,destination,session_id,backup_name,notify)
         raise
     finally:
         if mux is not None:mux.close()
         conn.close()
+
+
+def recover_phone_backup(client,destination,session_id,backup_name,notify,wait=time.sleep,clock=time.monotonic):
+    """Wait for this phone recording to finalize, then retrieve its ORIGINAL MP4.
+
+    No recording restart/stop is sent. Incomplete PC fragments are retained separately.
+    Five minutes without connectivity stops retries; a connected ongoing take may be hours.
+    """
+    destination=Path(destination);last_online=clock();created=last_online;transfer_started=None
+    notify('recovering',{'sessionId':session_id,'message':'Поток прерван. Съёмка остаётся на телефоне. После остановки скачиваем резерв.'})
+    while True:
+        try:
+            status=client.json('/status')
+        except (OSError,http.client.HTTPException):
+            if clock()-last_online>=300:raise ConnectionError('Нет связи 5 минут. Проверьте резерв на телефоне; новая съёмка не запускалась.')
+            wait(2);continue
+        last_online=clock()
+        same=status.get('recordingSessionId')==session_id
+        if same:
+            backup_name=status.get('recordingBackupName') or backup_name
+            state=status.get('recordingBackupState')
+            if state=='failed':raise RuntimeError('Телефон сообщил ошибку сохранения резервной записи. Проверьте незавершённый файл на телефоне.')
+            if state!='complete':
+                if state=='starting' and clock()-created>45:raise TimeoutError('Телефон не подтвердил начало записи; проверьте камеру.')
+                wait(1);continue
+        if not re.fullmatch(r'CD_\d+_[a-f0-9]{8}\.mp4',backup_name):
+            raise RuntimeError('Не удалось однозначно определить резерв этой записи. Скачайте его вручную с телефона.')
+        if transfer_started is None:transfer_started=clock()
+        if clock()-transfer_started>=300:raise TimeoutError('Не удалось скачать резерв за 5 минут. Оригинал остаётся на телефоне.')
+        try:files=client.json('/media').get('files',[])
+        except (ConnectionError,TimeoutError,http.client.HTTPException):wait(2);continue
+        original=next((f for f in files if f.get('name')==backup_name and f.get('complete',True)),None)
+        if original is None:raise RuntimeError('Завершённый резерв этой записи пока недоступен. Проверьте материалы на телефоне.')
+        if shutil.disk_usage(destination.parent).free<int(original['size'])+64_000_000:raise OSError('Недостаточно места для резерва. Оригинал сохранён на телефоне.')
+        try:
+            with tempfile.TemporaryDirectory(prefix='camera-deck-backup-',dir=destination.parent) as folder:
+                downloaded=client.download(backup_name,Path(folder))
+                if destination.exists():raise FileExistsError('Файл назначения уже существует; резерв не перезаписан')
+                downloaded.rename(destination)
+        except (ConnectionError,TimeoutError,http.client.HTTPException):wait(2);continue
+        destination.with_suffix('.recording.json').write_text(json.dumps({'state':'recovered','phoneBackup':True,'source':backup_name,'partial':destination.with_suffix('.partial.mp4').name}),encoding='utf-8')
+        notify('complete',{'path':str(destination),'bytes':destination.stat().st_size,'backupRecovered':True})
+        return destination
 
 
 def recover_partial(source,destination):

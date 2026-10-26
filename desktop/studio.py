@@ -141,10 +141,11 @@ class Studio(QWidget):
         self.photo.setVisible(s.get("mode")=="photo");self.record.setVisible(s.get("mode")=="video")
         self.record.setText('■ Стоп' if s.get('recording') else '● Запись');self.record.setEnabled(bool(s.get('ready')) and s.get('mode')=='video');self.photo.setEnabled(bool(s.get('ready')) and not s.get('recording') and s.get('mode')=='photo')
         job=self.pc_jobs.get(id(self.selected),{})
-        active=job.get('state') in ('starting','recording')
+        active=job.get('state') in ('starting','recording','recovering')
         self.record_pc.setText('■ Остановить запись на ПК' if active else 'Запись оригинала на ПК')
         self.record_pc.setEnabled(bool(s.get('ready')) and s.get('mode')=='video' and bool(s.get('originalRecording')) and (not s.get('recording') or active))
-        if active and not s.get('recording'):self.record_pc.setEnabled(False)
+        if active and (not s.get('recording') or self.selected.failures):self.record_pc.setEnabled(False)
+        if active and job.get('sessionId') and s.get('recordingActiveSessionId')!=job['sessionId']:self.record_pc.setEnabled(False)
         self.pc_status.setText(job.get('message','Телефон должен поддерживать протокол оригинальной записи (Android 10+).') if self.selected else '')
         if active and not s.get('recording'):self.record.setEnabled(False)
         if self.selected:
@@ -188,7 +189,9 @@ class Studio(QWidget):
         from pathlib import Path
         from recording import receive_original
         tile=self.selected;identity=id(tile);client=tile.client;job=self.pc_jobs.get(identity,{})
-        if job.get('state') in ('starting','recording'):
+        if job.get('state') in ('starting','recording','recovering'):
+            if tile.failures:return
+            if job.get('sessionId') and tile.status.get('recordingActiveSessionId')!=job['sessionId']:return
             self.window.run(lambda:client.command('record_stop'));return
         path,_=QFileDialog.getSaveFileName(self.window,'Запись оригинала на ПК','','Видео MP4 (*.mp4)')
         if not path:return
@@ -200,8 +203,8 @@ class Studio(QWidget):
 
     def pc_event(self,event):
         identity,state,data=event
-        message={'starting':'Телефон принял команду. Ожидаем дорожки оригинала.','recording':f"Пишем на ПК · {data.get('bytes',0)/1048576:.1f} МБ · резерв на телефоне",'complete':'Готово: '+data.get('path',''),'error':'Запись на ПК прервана. Проверьте резерв на телефоне. '+data.get('message','')}[state]
-        self.pc_jobs[identity]={'state':state,'message':message};self.refresh()
+        message={'starting':'Телефон принял команду. Ожидаем дорожки оригинала.','recording':f"Пишем на ПК · {data.get('bytes',0)/1048576:.1f} МБ · резерв на телефоне",'recovering':data.get('message','Восстанавливаем резерв с телефона'),'complete':('Резерв восстановлен: ' if data.get('backupRecovered') else 'Готово: ')+data.get('path',''),'error':'Запись на ПК прервана. Проверьте резерв на телефоне. '+data.get('message','')}[state]
+        self.pc_jobs[identity]={**self.pc_jobs.get(identity,{}),**data,'state':state,'message':message};self.refresh()
 
     def monitor_tools(self,*_):
         if self.selected:

@@ -1,6 +1,6 @@
 # Camera Deck · Slate
 
-Android cameras controlled from a Windows operator desk. **Slate 0.9.0 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical phone, Wi-Fi and USB validation remains necessary.
+Android cameras controlled from a Windows operator desk. **Slate 0.9.1 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical phone, Wi-Fi and USB validation remains necessary. Shipping a signed auto-update requires the existing Aurora APK and update signing identities; a CI/debug APK is not an update for an installed public build.
 
 ## Start
 
@@ -30,6 +30,10 @@ Recording waits for the previous session to close and releases the separate prev
 Choose Video, a supported recording mode, then **Камера → Запись оригинала на ПК**. Original encoded video/AAC packets and timestamps travel over TLS; Windows remuxes without re-encoding. Fragmented MP4 with delayed initialization preserves initial A/V offsets. Completion requires explicit terminal confirmation and muxer closure.
 
 **Phone backup is mandatory in Slate and still consumes phone/selected-phone-storage space. PC-only recording is not implemented.** Network/PC disk failures do not automatically stop the backup. Windows retains `.partial.mp4` plus a `.recording.json` journal. Recovery depends on readable completed fragments; it is not guaranteed before initialization or after arbitrary disk damage. Closing during capture warns that the PC copy will be interrupted.
+
+Since 0.9.1, interrupted PC capture switches to recovery rather than restarting the take. With both updated apps, a unique recording session identifies the matching phone backup. After the operator stops recording, Windows downloads that completed MP4 to the chosen filename; incomplete PC fragments are retained separately. Up to five minutes offline or five minutes of failed transfer retries are tolerated. Closing the PC app stops this recovery worker, not phone capture. Failed phone storage/codec finalization, missing storage, unavailable backup identity or insufficient PC space are reported explicitly; automatic recovery is not a guarantee against device/storage failure. Reconnection to a restarted service requires remembered pairing or a new manual pairing.
+
+Live audio monitoring is independent of VIEW and retries every two seconds while enabled and visible. Minimizing/hiding the view pauses monitoring only. Transient microphone exceptions generate marked silence while the microphone is retried; an overfull audio input queue discards stale blocks with a warning instead of aborting video. Lost sound cannot be reconstructed: counters/warnings remain visible. Fatal codec or storage errors can still stop capture. Neither uninterrupted audio nor A/V sync has been established on physical phones.
 
 The relay is bounded to 64 MB/8 MB per message and never waits on a slow network from the phone encoder. Windows checks disk capacity before/during recording. Android 10+ is required for disabling B-frames on the original relay; reordered encoder output explicitly terminates the PC copy. Android 9 keeps local phone recording.
 

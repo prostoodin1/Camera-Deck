@@ -57,24 +57,31 @@ final class AudioEngine implements AutoCloseable {
                 if(mic.getTimestamp(timestamp,AudioTimestamp.TIMEBASE_BOOTTIME)==AudioRecord.SUCCESS && timestamp.nanoTime>0)
                     now=timestamp.nanoTime+(framesRead-timestamp.framePosition)*1_000_000_000L/RATE;
                 AvRecorder target=recording;
-                if(target!=null) target.offerAudio(pcm,now);
+                if(target!=null){target.microphoneRecovered();target.offerAudio(pcm,now);}
                 for(Listener listener:listeners) {
                     if(SystemClock.elapsedRealtime()-listener.lastRead>5000) { listener.close(); continue; }
                     if(!listener.queue.offer(pcm)) { listener.queue.poll(); listener.queue.offer(pcm); }
                 }
             } catch(Exception e) {
                 error=e.getMessage()==null?e.toString():e.getMessage();
-                AvRecorder target=recording; if(target!=null) target.failAudio(error);
+                AvRecorder target=recording; if(target!=null) target.microphoneGap(error);
                 for(Listener listener:listeners) listener.close();
                 releaseMic();
-                try { Thread.sleep(250); } catch(InterruptedException ignored) {}
+                // Keep the existing AAC timeline alive during a transient microphone failure.
+                // Silence is explicit in telemetry; this never fabricates a successful mic signal.
+                for(int i=0;i<12&&running;i++) {
+                    try { Thread.sleep(20); } catch(InterruptedException ignored) { break; }
+                    target=recording;
+                    if(target!=null)target.offerAudio(new byte[BYTES_PER_CHUNK],SystemClock.elapsedRealtimeNanos());
+                }
             }
         }
         releaseMic();
     }
     void releaseMic() {
         capturing=false;
-        if(mic!=null) { try { mic.stop(); } catch(Exception ignored) {} mic.release(); mic=null; }
+        AudioRecord previous=mic;mic=null;
+        if(previous!=null){try{previous.stop();}catch(Exception ignored){}try{previous.release();}catch(Exception ignored){}}
     }
     final class Listener extends InputStream {
         final ArrayBlockingQueue<byte[]> queue=new ArrayBlockingQueue<>(5);
