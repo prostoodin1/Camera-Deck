@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     if sys.platform != "win32":
         raise SystemExit("Windows packaging requires Windows")
-    runtime = Path(sys.base_prefix)
+    import PyQt6
+    # Qt may require newer MSVC entry points than the Python installation.
+    # Ship the complete compatible upstream runtime supplied with this Qt wheel.
+    runtime = Path(PyQt6.__file__).parent/'Qt6/bin'
     required = [runtime / name for name in ("vcruntime140.dll", "vcruntime140_1.dll")]
     for dll in required:
         if not dll.is_file():
@@ -37,7 +40,7 @@ def main():
               "--add-data", "aurora-update-public.pem;.", "--add-data", "client-update-public.pem;.", "--collect-all", "av",
               "--add-data", "../third_party_licenses;third_party_licenses",
               "--add-data", "../THIRD_PARTY_NOTICES.md;."]
-    for dll in required:
+    for dll in sorted(runtime.glob('*140*.dll')):
         common += ["--add-binary", f"{dll};."]
     sys.path.insert(0,str(ROOT/'desktop'))
     from usb_transport import adb_path
