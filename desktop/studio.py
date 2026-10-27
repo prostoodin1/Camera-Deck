@@ -1,10 +1,11 @@
 """Camera Deck workspaces. Network operations stay in Window.run workers."""
 from datetime import datetime
-from PyQt6.QtCore import Qt,QTimer,pyqtSignal
+from PyQt6.QtCore import Qt,QTimer,pyqtSignal,QSize
+from PyQt6.QtGui import QIcon,QPixmap
 from PyQt6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QFrame,
     QComboBox,QLineEdit,QScrollArea,QGridLayout,QStackedWidget,QSplitter,QFormLayout,
     QTableWidget,QTableWidgetItem,QHeaderView,QPlainTextEdit,QAbstractItemView)
-from appearance import Toggle
+from appearance import Toggle,ShutterButton
 from icons import icon
 import production
 
@@ -18,7 +19,7 @@ class Studio(QWidget):
         outer=QVBoxLayout(self);outer.setContentsMargins(16,12,16,12);outer.setSpacing(10)
         top=QHBoxLayout();brand=QLabel('CAMERA DECK');brand.setStyleSheet('font-size:15px;font-weight:600;letter-spacing:2px');top.addWidget(brand);top.addSpacing(24)
         self.nav=[]
-        for index,title in enumerate(('Монитор','Камера','Продакшн','Материалы')):
+        for index,title in enumerate(('Мультикамеры','Съёмка','Продакшн','Материалы')):
             button=QPushButton(title);button.setIcon(icon(("monitor","control","production","media")[index]));button.setCheckable(True);button.setObjectName('navigation');button.clicked.connect(lambda checked=False,i=index:self.navigate(i));top.addWidget(button);self.nav.append(button)
         top.addStretch();window.connection_count=QLabel('Нет камер');top.addWidget(window.connection_count)
         window.devices_button=QPushButton('Устройства');window.devices_button.setCheckable(True);window.devices_button.setChecked(True);top.addWidget(window.devices_button)
@@ -40,6 +41,9 @@ class Studio(QWidget):
         window.filter=QComboBox();window.filter.addItem('Все группы');window.filter.currentTextChanged.connect(window.rebuild);toolbar.addWidget(window.filter)
         window.columns=QComboBox();window.columns.addItems(['1 колонка','2 колонки','3 колонки']);window.columns.setCurrentIndex(1);window.columns.currentIndexChanged.connect(window.rebuild);toolbar.addWidget(window.columns);middle.addLayout(toolbar)
         self.pages=QStackedWidget();middle.addWidget(self.pages,1)
+        self.camera_choices={};self.devices_collapsed=False
+        self.filmstrip=QScrollArea();self.filmstrip.setWidgetResizable(True);self.filmstrip.setFixedHeight(86);self.filmstrip.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        film=QWidget();film.setObjectName("cameraGrid");self.film_layout=QHBoxLayout(film);self.film_layout.setContentsMargins(0,3,0,3);self.film_layout.setSpacing(8);self.film_layout.addStretch();self.filmstrip.setWidget(film);middle.addWidget(self.filmstrip)
         monitor=QScrollArea();monitor.setWidgetResizable(True)
         window.grid_widget=QWidget();window.grid_widget.setObjectName('cameraGrid');window.grid=QGridLayout(window.grid_widget);window.grid.setContentsMargins(0,0,0,0);window.grid.setSpacing(10);window.grid.setAlignment(Qt.AlignmentFlag.AlignTop);monitor.setWidget(window.grid_widget);self.pages.addWidget(monitor)
         window.empty=QLabel('Подключите первую камеру\n\nВключите Camera Deck на телефоне, затем нажмите «Найти».\nПосле первого сопряжения доверенный телефон подключится без PIN.');window.empty.setWordWrap(True);window.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);window.empty.setMinimumHeight(320);window.empty.setObjectName('emptyMonitor');window.grid.addWidget(window.empty,0,0)
@@ -52,34 +56,36 @@ class Studio(QWidget):
         from media_browser import MediaBrowser
         self.media=MediaBrowser(window);self.pages.addWidget(self.media)
         self.split.addWidget(center)
-        self.inspector=QScrollArea();self.inspector.setWidgetResizable(True);self.inspector.setMinimumWidth(260);self.inspector.setMaximumWidth(340)
-        panel=QWidget();panel.setObjectName('surface');form=QVBoxLayout(panel);form.setContentsMargins(16,16,16,16);self.selection=QComboBox();self.selection.currentIndexChanged.connect(self.select_index);form.addWidget(QLabel('ВЫБРАННАЯ КАМЕРА'));form.addWidget(self.selection)
+        self.inspector=QScrollArea();self.inspector.setWidgetResizable(True);self.inspector.setMinimumWidth(272);self.inspector.setMaximumWidth(340)
+        panel=QWidget();panel.setObjectName('surface');form=QVBoxLayout(panel);form.setContentsMargins(16,18,16,16);form.setSpacing(9)
+        self.selection=QComboBox();self.selection.currentIndexChanged.connect(self.select_index);form.addWidget(QLabel('КАМЕРА'));form.addWidget(self.selection)
         self.status=QLabel('Подключите камеру');self.status.setWordWrap(True);self.status.setObjectName('muted');form.addWidget(self.status)
-        self.readouts={}
-        for key,label in [('iso','ISO'),('shutter','Выдержка'),('focus','Фокус')]:
-            button=QPushButton(label);button.clicked.connect(lambda checked=False,k=key:self.sensor(k));self.readouts[key]=button;form.addWidget(button)
-        for title,method in [('Качество и формат','settings'),('Зум и композиция','framing_settings'),('Скачать материалы','media'),('На весь экран','open_fullscreen')]:
-            button=QPushButton(title);button.clicked.connect(lambda checked=False,m=method:self.invoke(m));form.addWidget(button)
         self.mode=QComboBox();self.mode.addItem('Фото','photo');self.mode.addItem('Видео','video');self.mode.activated.connect(lambda _:self.selected and self.selected.command('capture_config',mode=self.mode.currentData()));form.addWidget(self.mode)
-        actions=QHBoxLayout();self.photo=QPushButton('Снять фото');self.photo.clicked.connect(lambda:self.selected and self.selected.command('photo'));self.record=QPushButton('● Запись');self.record.setObjectName('recordAction');self.record.clicked.connect(lambda:self.selected and self.selected.command('record_stop' if self.selected.status.get('recording') else 'record_start'));actions.addWidget(self.photo);actions.addWidget(self.record);form.addLayout(actions)
+        self.readouts={}
+        from appearance import DropdownButton
+        for key,label in [('iso','ISO'),('shutter','Выдержка'),('ev','Яркость EV'),('focus','Фокус')]:
+            button=DropdownButton(label);button.setObjectName('readout');button.clicked.connect(lambda checked=False,k=key:self.sensor(k));self.readouts[key]=button;form.addWidget(button)
+        for title,method in [('Качество и формат','settings'),('Цвет и размытие','image_settings')]:
+            button=QPushButton(title);button.clicked.connect(lambda checked=False,m=method:self.invoke(m));form.addWidget(button)
+        actions=QHBoxLayout();self.photo=ShutterButton(True);self.photo.clicked.connect(lambda:self.selected and self.selected.command('photo'));self.record=ShutterButton(False);self.record.clicked.connect(lambda:self.selected and self.selected.command('record_stop' if self.selected.status.get('recording') else 'record_start'));actions.addStretch();actions.addWidget(self.photo);actions.addWidget(self.record);actions.addStretch();form.addLayout(actions)
         self.record_pc=QPushButton('Запись оригинала на ПК');self.record_pc.setObjectName('recordAction');self.record_pc.clicked.connect(self.pc_record);form.addWidget(self.record_pc)
-        pc_note=QLabel('Исходные видео и звук. Резервная копия остаётся на телефоне.');pc_note.setObjectName('muted');pc_note.setWordWrap(True);form.addWidget(pc_note)
-        self.pc_status=QLabel('');self.pc_status.setWordWrap(True);form.addWidget(self.pc_status)
-        self.recording_event.connect(self.pc_event)
-        form.addWidget(QLabel('ИНСТРУМЕНТЫ ПРОСМОТРА'))
-        self.tool=QComboBox()
+        self.pc_note=QLabel('Видео и звук. Резервная копия — на телефоне.');self.pc_note.setObjectName('muted');self.pc_note.setWordWrap(True);form.addWidget(self.pc_note)
+        self.pc_status=QLabel('');self.pc_status.setWordWrap(True);self.pc_status.setObjectName('muted');form.addWidget(self.pc_status);self.recording_event.connect(self.pc_event)
+        self.details_toggle=Toggle('Дополнительные настройки');form.addWidget(self.details_toggle)
+        details=QWidget();extra=QVBoxLayout(details);extra.setContentsMargins(0,8,0,0);extra.setSpacing(9);form.addWidget(details);details.hide();self.details_toggle.toggled.connect(details.setVisible)
+        for title,method in [('Зум, лица и композиция','framing_settings'),('Источник / выход звука','audio_settings'),('Скачать материалы','media'),('На весь экран','open_fullscreen')]:
+            button=QPushButton(title);button.clicked.connect(lambda checked=False,m=method:self.invoke(m));extra.addWidget(button)
+        extra.addWidget(QLabel('ИНСТРУМЕНТЫ ПРОСМОТРА'));self.tool=QComboBox()
         for title,key in [('Обычный вид','none'),('Гистограмма','histogram'),('Waveform','waveform'),('Zebra ≥235/255','zebra'),('False color','false')]:self.tool.addItem(title,key)
-        self.tool.setToolTip('Приблизительный анализ 8-bit предпросмотра. Не измерение RAW, HDR или экспозиции сенсора.');self.tool.activated.connect(self.monitor_tools);form.addWidget(self.tool)
-        self.grid_lines=Toggle('Сетка третей');self.grid_lines.toggled.connect(self.monitor_tools);form.addWidget(self.grid_lines)
-        self.safe_area=Toggle('Безопасная область 90%');self.safe_area.toggled.connect(self.monitor_tools);form.addWidget(self.safe_area)
-        self.group=QLineEdit();self.group.setPlaceholderText('Группа камеры');self.group.editingFinished.connect(self.change_group);form.addWidget(self.group)
-        self.view=Toggle('Предпросмотр');self.view.toggled.connect(lambda value:self.selected and self.selected.view_toggle.setChecked(value));form.addWidget(self.view)
-        self.audio=Toggle('Слушать микрофон');self.audio.toggled.connect(lambda value:self.selected and self.selected.listen.setChecked(value));form.addWidget(self.audio)
-        image=QPushButton('Яркость / цвет / фон');image.clicked.connect(lambda:self.invoke('image_settings'));form.addWidget(image)
-        audio_route=QPushButton('Источник / выход звука');audio_route.clicked.connect(lambda:self.selected and self.selected.audio_settings());form.addWidget(audio_route)
-        rotate=QPushButton('Повернуть 90°');rotate.clicked.connect(lambda:self.selected and self.selected.rotate_picture());form.addWidget(rotate)
-        self.lock=Toggle('Блокировка поворота');self.lock.toggled.connect(lambda value:self.selected and self.selected.lock_rotation(value));form.addWidget(self.lock)
-        form.addStretch();self.inspector.setWidget(panel);self.split.addWidget(self.inspector);self.inspector.hide();self.split.setStretchFactor(1,1);self.split.setSizes([230,900,280])
+        self.tool.setToolTip('Приблизительный анализ 8-bit предпросмотра. Не измерение RAW, HDR или экспозиции сенсора.');self.tool.activated.connect(self.monitor_tools);extra.addWidget(self.tool)
+        self.grid_lines=Toggle('Сетка третей');self.grid_lines.toggled.connect(self.monitor_tools);extra.addWidget(self.grid_lines)
+        self.safe_area=Toggle('Безопасная область 90%');self.safe_area.toggled.connect(self.monitor_tools);extra.addWidget(self.safe_area)
+        self.group=QLineEdit();self.group.setPlaceholderText('Группа камеры');self.group.editingFinished.connect(self.change_group);extra.addWidget(self.group)
+        self.view=Toggle('Предпросмотр');self.view.toggled.connect(lambda value:self.selected and self.selected.view_toggle.setChecked(value));extra.addWidget(self.view)
+        self.audio=Toggle('Слушать микрофон');self.audio.toggled.connect(lambda value:self.selected and self.selected.listen.setChecked(value));extra.addWidget(self.audio)
+        rotate=QPushButton('Повернуть 90°');rotate.clicked.connect(lambda:self.selected and self.selected.rotate_picture());extra.addWidget(rotate)
+        self.lock=Toggle('Блокировка поворота');self.lock.toggled.connect(lambda value:self.selected and self.selected.lock_rotation(value));extra.addWidget(self.lock)
+        form.addStretch();self.inspector.setWidget(panel);self.split.addWidget(self.inspector);self.inspector.hide();self.split.setStretchFactor(1,1);self.split.setSizes([230,900,290])
         footer=QHBoxLayout();window.auto=Toggle('Автообновления');window.auto.setChecked(window.load_preferences().get('autoUpdates',True));window.auto.toggled.connect(window.save_preferences);footer.addWidget(window.auto)
         import updates
         window.update_label=QLabel('Camera Deck · '+updates.RELEASE_NAME);window.update_label.setObjectName('muted');footer.addWidget(window.update_label);footer.addStretch()
@@ -88,14 +94,15 @@ class Studio(QWidget):
         self.group_start.clicked.connect(lambda:self.operate(True));self.group_stop.clicked.connect(lambda:self.operate(False));self.operation.connect(self.operation_result);self.results={}
         self.timer=QTimer(self);self.timer.timeout.connect(self.refresh);self.timer.start(1000)
         self.saved_selection=window.load_preferences().get('selectedCamera','')
-        self.navigate(0)
+        self.navigate(1)
 
     def navigate(self,index):
         if index!=3:
             self.media.player.pause()
             if self.workspace==3:self.media.epoch+=1
         self.workspace=index;self.pages.setCurrentIndex(0 if index<2 else index-1);self.inspector.setVisible(index==1)
-        self.title.setText(('Мониторинг','Управление камерой','Съёмочная группа','Материалы')[index])
+        self.title.setText(('Мультикамеры','Съёмка','Съёмочная группа','Материалы')[index])
+        self.filmstrip.setVisible(index==1);self.window.filter.setVisible(index in (0,2));self.window.columns.setVisible(index==0)
         for i,b in enumerate(self.nav):b.setChecked(i==index)
         if index==3:self.media.set_camera(self.selected)
         if hasattr(self.window,'studio'):self.window.rebuild()
@@ -106,10 +113,11 @@ class Studio(QWidget):
             else:getattr(self.selected,method)()
 
     def sensor(self,key):
-        if self.selected:self.selected.quick_sensor(key,getattr(self.selected,{'iso':'iso_readout','shutter':'shutter_readout','focus':'focus_readout'}[key]))
+        if self.selected:self.selected.quick_sensor(key,self.readouts[key])
 
     def select(self,tile):
         self.selected=tile;self.saved_selection=getattr(tile.client,"fingerprint",tile.client.host);self.refresh()
+        if self.workspace==1:self.window.rebuild()
         if self.workspace==3:self.media.set_camera(tile)
 
     def select_index(self,index):
@@ -130,6 +138,18 @@ class Studio(QWidget):
             for name,tile in entries:self.selection.addItem(name,tile)
         if self.selected:self.selection.setCurrentIndex(tiles.index(self.selected))
         self.selection.blockSignals(False)
+        for tile in list(self.camera_choices):
+            if tile not in tiles:
+                button=self.camera_choices.pop(tile);self.film_layout.removeWidget(button);button.deleteLater()
+        for tile in tiles:
+            if tile not in self.camera_choices:
+                button=QPushButton();button.setObjectName('cameraChoice');button.setCheckable(True);button.setMinimumWidth(175);button.setIconSize(QSize(64,42));button.clicked.connect(lambda checked=False,t=tile:self.select(t));self.film_layout.insertWidget(self.film_layout.count()-1,button);self.camera_choices[tile]=button
+            button=self.camera_choices[tile];button.setChecked(tile is self.selected)
+            label='Нет связи' if tile.failures else '● Запись' if tile.status.get('recording') else 'Готово' if tile.status.get('ready') else 'Ожидание'
+            button.setText(tile.name.text()+'\n'+label);button.setToolTip('Выбрать камеру · миниатюра последнего полученного кадра')
+            image=tile.video.frame
+            if image is not None and getattr(button,'frame_key',None)!=image.cacheKey():
+                button.setIcon(QIcon(QPixmap.fromImage(image.scaled(64,42,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.FastTransformation))));button.frame_key=image.cacheKey()
         s=self.selected.status if self.selected else {}
         self.status.setText(('Запись идёт' if s.get('recording') else 'Готово' if s.get('ready') else 'Ожидаем состояние')+('\n'+s['error'] if s.get('error') else ''))
         if s.get('trackingAvailable') is False:self.status.setText(self.status.text()+'\nВ этом режиме записи анализ лица и автозум недоступны')
@@ -139,16 +159,17 @@ class Studio(QWidget):
         if s.get('thermalStatus',-1)>=3:self.status.setText(self.status.text()+'\nСистема сообщает ограничения из-за нагрева')
         self.mode.blockSignals(True);self.mode.setCurrentIndex(1 if s.get('mode')=='video' else 0);self.mode.blockSignals(False);self.mode.setEnabled(bool(s.get('ready')) and not s.get('recording'))
         for key,button in self.readouts.items():
-            value={'iso':s.get('iso') or '—','shutter':f"{s.get('exposureNs',0)/1e6:.2f} мс",'focus':'Авто' if s.get('focus',-1)<0 else s['focus']}[key]
-            button.setText({'iso':'ISO','shutter':'Выдержка','focus':'Фокус'}[key]+'   '+str(value));button.setEnabled(bool(s.get('ready')))
+            value={'iso':('AUTO · ' if not s.get('manualIso') else '')+str(s.get('manualIso') or s.get('iso') or '—'),'shutter':f"{s.get('exposureNs',0)/1e6:.2f} мс",'focus':'Авто' if s.get('focus',-1)<0 else s['focus'],'ev':f"{s.get('imageControls',{}).get('ev',0):+.2f}"}[key]
+            button.setText({'iso':'ISO','shutter':'Выдержка','focus':'Фокус','ev':'Яркость EV'}[key]+'   '+str(value));button.setEnabled(bool(s.get('ready')))
         self.photo.setVisible(s.get("mode")=="photo");self.record.setVisible(s.get("mode")=="video")
-        self.record.setText('■ Стоп' if s.get('recording') else '● Запись');self.record.setEnabled(bool(s.get('ready')) and s.get('mode')=='video');self.photo.setEnabled(bool(s.get('ready')) and not s.get('recording') and s.get('mode')=='photo')
+        self.record.set_recording(bool(s.get('recording')));self.record.setEnabled(bool(s.get('ready')) and s.get('mode')=='video');self.photo.setEnabled(bool(s.get('ready')) and not s.get('recording') and s.get('mode')=='photo')
         job=self.pc_jobs.get(id(self.selected),{})
         active=job.get('state') in ('starting','recording','recovering')
         self.record_pc.setText('■ Остановить запись на ПК' if active else 'Запись оригинала на ПК')
         self.record_pc.setEnabled(bool(s.get('ready')) and s.get('mode')=='video' and bool(s.get('originalRecording')) and (not s.get('recording') or active))
         if active and (not s.get('recording') or self.selected.failures):self.record_pc.setEnabled(False)
         if active and job.get('sessionId') and s.get('recordingActiveSessionId')!=job['sessionId']:self.record_pc.setEnabled(False)
+        self.record_pc.setVisible(s.get('mode')=='video');self.pc_note.setVisible(s.get('mode')=='video');self.pc_status.setVisible(s.get('mode')=='video')
         self.pc_status.setText(job.get('message','Телефон должен поддерживать протокол оригинальной записи (Android 10+).') if self.selected else '')
         if active and not s.get('recording'):self.record.setEnabled(False)
         if self.selected:

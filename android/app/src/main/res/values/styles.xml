@@ -2,16 +2,20 @@
     <style name="CameraDeckTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#FFD76B</item>
-        <item name="android:windowBackground">#030303</item>
-        <item name="android:colorBackground">#030303</item>
+        <item name="android:colorAccent">#F1D578</item>
+        <item name="android:windowBackground">#090C10</item>
+        <item name="android:colorBackground">#090C10</item>
         <item name="android:colorForeground">#EDF2FA</item>
         <item name="android:textColorPrimary">#EDF2FA</item>
-        <item name="android:textColorSecondary">#999999</item>
+        <item name="android:textColorSecondary">#B3BDCB</item>
         <item name="android:colorControlNormal">#888888</item>
-        <item name="android:colorControlActivated">#FFD76B</item>
-        <item name="android:statusBarColor">#030303</item>
-        <item name="android:navigationBarColor">#030303</item>
+        <item name="android:colorControlActivated">#F1D578</item>
+        <item name="android:statusBarColor">#090C10</item>
+        <item name="android:navigationBarColor">#090C10</item>
         <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="GlassSheetMotion">
+        <item name="android:windowEnterAnimation">@anim/glass_sheet_enter</item>
+        <item name="android:windowExitAnimation">@anim/glass_sheet_exit</item>
     </style>
 </resources>

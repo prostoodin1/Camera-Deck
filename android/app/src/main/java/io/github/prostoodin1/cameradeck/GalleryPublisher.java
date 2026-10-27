@@ -46,18 +46,19 @@ final class GalleryPublisher {
             File target=new File(dir,file.getName());
             if(target.exists()){if(target.length()!=file.length())throw new IOException("В галерее уже есть другой файл с таким именем");}
             else{File partial=new File(dir,file.getName()+".partial");try(InputStream in=new FileInputStream(file);OutputStream out=new FileOutputStream(partial)){copy(in,out);}if(!partial.renameTo(target))throw new IOException("Не удалось завершить копию");}
-            MediaScannerConnection.scanFile(c,new String[]{target.getAbsolutePath()},new String[]{mime},null);return;
+            MediaScannerConnection.scanFile(c,new String[]{target.getAbsolutePath()},new String[]{mime},(path,scanned)->{if(scanned!=null)c.getSharedPreferences("deck",0).edit().putString("galleryLastUri",scanned.toString()).putString("galleryLastMime",mime).apply();});return;
         }
         ContentResolver resolver=c.getContentResolver();Uri collection=mime.startsWith("video")?MediaStore.Video.Media.EXTERNAL_CONTENT_URI:MediaStore.Images.Media.EXTERNAL_CONTENT_URI;Uri uri=null;
         String selection=MediaStore.MediaColumns.DISPLAY_NAME+"=? AND "+MediaStore.MediaColumns.RELATIVE_PATH+"=? AND "+MediaStore.MediaColumns.OWNER_PACKAGE_NAME+"=?";
         try(Cursor rows=resolver.query(collection,new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.IS_PENDING},selection,new String[]{file.getName(),FOLDER,c.getPackageName()},null)){
-            if(rows!=null&&rows.moveToFirst()){if(rows.getInt(1)==0)return;uri=ContentUris.withAppendedId(collection,rows.getLong(0));}
+            if(rows!=null&&rows.moveToFirst()){uri=ContentUris.withAppendedId(collection,rows.getLong(0));if(rows.getInt(1)==0){c.getSharedPreferences("deck",0).edit().putString("galleryLastUri",uri.toString()).putString("galleryLastMime",mime).apply();return;}}
         }
         if(uri==null){ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,file.getName());values.put(MediaStore.MediaColumns.MIME_TYPE,mime);values.put(MediaStore.MediaColumns.RELATIVE_PATH,FOLDER);values.put(MediaStore.MediaColumns.IS_PENDING,1);uri=resolver.insert(collection,values);}
         if(uri==null)throw new IOException("Android не создал запись галереи");
         try{
             try(InputStream in=new FileInputStream(file);OutputStream out=resolver.openOutputStream(uri,"wt")){if(out==null)throw new IOException("Нет доступа к галерее");copy(in,out);}
             ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.IS_PENDING,0);if(resolver.update(uri,values,null,null)!=1)throw new IOException("Не подтверждено завершение копии");
+            c.getSharedPreferences("deck",0).edit().putString("galleryLastUri",uri.toString()).putString("galleryLastMime",mime).apply();
         }catch(Exception e){try{resolver.delete(uri,null,null);}catch(Exception ignored){}throw e;}
     }
 }

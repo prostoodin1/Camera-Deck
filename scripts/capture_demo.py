@@ -25,7 +25,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"desktop"))
 from PyQt6.QtCore import QBuffer,QByteArray,QIODevice,QTimer,Qt
 from PyQt6.QtGui import QImage,QPainter,QColor,QFont,QFontDatabase
-from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget
+from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget,QPushButton
 from main import Window,CameraTile
 from protocol import CameraClient
 from updates import VERSION,VERSION_CODE
@@ -155,6 +155,7 @@ def main():
             window.tiles[0].client.download(filename,folder)
             window.tiles[1].client.command("capture_config",mode="video",videoWidth=3840,videoHeight=2160,videoFps=30)
             window.tiles[1].client.command("record_start")
+            window.studio.select(window.tiles[1]);window.studio.navigate(1)
         def capture_recording():
             screenshot("02-video-control-simulator.png")
             original=QDialog.exec
@@ -168,6 +169,11 @@ def main():
             tile=window.tiles[0];tile.open_fullscreen();app.processEvents();assert tile.fullscreen.isFullScreen();assert not window.isFullScreen()
             assert tile.fullscreen.grab().save(str(out/"05-fullscreen-monitor.png"));tile.fullscreen.reject();app.processEvents()
             def capture_popup(dialog):
+                from appearance import Toggle
+                automatic=dialog.findChild(Toggle)
+                if automatic:automatic.setChecked(False)
+                for chip in dialog.findChildren(QPushButton):
+                    if chip.property('sensorValue')==400:chip.click()
                 dialog.show();app.processEvents();assert dialog.grab().save(str(out/"06-iso-popover.png"));return QDialog.DialogCode.Rejected
             QDialog.exec=capture_popup
             try:tile.quick_sensor("iso",tile.iso_readout)

@@ -1,6 +1,6 @@
 """Camera Deck's minimal glass theme and viewfinder."""
 from PyQt6.QtCore import QPointF, Qt,QRectF,QSize,QPoint,QTimer
-from PyQt6.QtGui import QColor,QPainter,QPen,QFont
+from PyQt6.QtGui import QColor,QPainter,QPen,QFont,QLinearGradient,QPainterPath
 from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider,QPushButton
 import math
 
@@ -12,23 +12,56 @@ class DropdownButton(QPushButton):
         p.drawLine(int(x-3),int(y-2),int(x),int(y+1));p.drawLine(int(x),int(y+1),int(x+3),int(y-2));p.end()
 
 
+class PrecisionSlider(QSlider):
+    """A small native slider with a ruler; no timer, capture, blur or extra video pass."""
+    def __init__(self,orientation):
+        super().__init__(orientation);self.setMinimumHeight(36);self.setSingleStep(50);self.setPageStep(500)
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);p.setOpacity(1 if self.isEnabled() else .35)
+        left=12.;width=max(1,self.width()-24.);y=self.height()/2+3;fraction=(self.value()-self.minimum())/max(1,self.maximum()-self.minimum())
+        p.setPen(QPen(QColor('#758397'),1))
+        for i in range(33):
+            x=left+width*i/32;p.drawLine(QPointF(x,y-11),QPointF(x,y-(18 if i%4==0 else 14)))
+        p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor('#4a5869'));p.drawRoundedRect(QRectF(left,y-2,width,4),2,2)
+        p.setBrush(QColor('#f1d578'));p.drawRoundedRect(QRectF(left,y-2,width*fraction,4),2,2)
+        x=left+width*fraction;gradient=QLinearGradient(x,y-9,x,y+9);gradient.setColorAt(0,QColor('#fff0b9'));gradient.setColorAt(1,QColor('#cfad52'));p.setBrush(gradient);p.setPen(QPen(QColor('#fce9a3'),1));p.drawEllipse(QPointF(x,y),8,8);p.end()
+    def position_value(self,event):
+        fraction=max(0,min(1,(event.position().x()-12)/max(1,self.width()-24)));self.setValue(round(self.minimum()+fraction*(self.maximum()-self.minimum())))
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:self.setFocus();self.setSliderDown(True);self.position_value(event);event.accept()
+        else:super().mousePressEvent(event)
+    def mouseMoveEvent(self,event):
+        if self.isSliderDown():self.position_value(event);event.accept()
+        else:super().mouseMoveEvent(event)
+    def mouseReleaseEvent(self,event):
+        if self.isSliderDown():self.position_value(event);self.setSliderDown(False);event.accept()
+        else:super().mouseReleaseEvent(event)
+
+
 class SliderField(QWidget):
     def __init__(self,minimum,maximum,value,decimals=0,logarithmic=False):
-        super().__init__();self.minimum=minimum;self.maximum=max(minimum,maximum);self.decimals=decimals;self.logarithmic=logarithmic
+        super().__init__();self.minimum=minimum;self.maximum=max(minimum,maximum);self.decimals=decimals;self.logarithmic=logarithmic;self.exact=None;self.setting_value=False
         layout=QVBoxLayout(self);layout.setContentsMargins(0,0,0,0);self.label=QLabel();self.label.setStyleSheet("color:#ffd76b;font-size:15px")
-        self.slider=QSlider(Qt.Orientation.Horizontal);self.slider.setRange(0,10000);layout.addWidget(self.label);layout.addWidget(self.slider)
+        self.slider=PrecisionSlider(Qt.Orientation.Horizontal);self.slider.setRange(0,10000);layout.addWidget(self.label);layout.addWidget(self.slider)
         if logarithmic and self.maximum>minimum and minimum>0:fraction=math.log(max(minimum,value)/minimum)/math.log(self.maximum/minimum)
         else:fraction=(value-minimum)/(self.maximum-minimum) if self.maximum>minimum else 0
-        self.slider.setValue(round(10000*min(1,max(0,fraction))));self.slider.valueChanged.connect(self.refresh);self.refresh()
+        self.slider.setValue(round(10000*min(1,max(0,fraction))));self.exact=max(minimum,min(self.maximum,value));self.slider.valueChanged.connect(self.changed);self.refresh()
+    def changed(self):
+        if not self.setting_value:self.exact=None
+        self.refresh()
+    def set_value(self,value):
+        value=max(self.minimum,min(self.maximum,value));span=self.maximum-self.minimum
+        fraction=math.log(value/self.minimum)/math.log(self.maximum/self.minimum) if self.logarithmic and self.minimum>0 and span>0 else (value-self.minimum)/span if span>0 else 0
+        self.setting_value=True;self.slider.setValue(round(fraction*10000));self.exact=value;self.setting_value=False;self.refresh()
     def value(self):
         f=self.slider.value()/10000
-        v=self.minimum*(self.maximum/self.minimum)**f if self.logarithmic and self.minimum>0 else self.minimum+(self.maximum-self.minimum)*f
+        v=self.exact if self.exact is not None else self.minimum*(self.maximum/self.minimum)**f if self.logarithmic and self.minimum>0 else self.minimum+(self.maximum-self.minimum)*f
         return round(v,self.decimals) if self.decimals else round(v)
     def refresh(self):self.label.setText(f"{self.value():.{self.decimals}f}")
 
 
 class GlassSheet(QDialog):
-    """Opaque camera controls without framebuffer capture or blur."""
+    """Layered glass material, drawn once per paint without sampling the live viewfinder."""
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Dialog|Qt.WindowType.FramelessWindowHint)
@@ -39,7 +72,10 @@ class GlassSheet(QDialog):
         super().showEvent(event)
     def paintEvent(self,event):
         p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QColor('#111111'));p.setPen(QPen(QColor('#454545'),1));p.drawRoundedRect(QRectF(self.rect()).adjusted(1,1,-1,-1),5,5);p.end()
+        rect=QRectF(self.rect()).adjusted(1,1,-1,-1);gradient=QLinearGradient(rect.topLeft(),rect.bottomRight())
+        gradient.setColorAt(0,QColor('#303b49'));gradient.setColorAt(.28,QColor('#1c2632'));gradient.setColorAt(1,QColor('#141c25'))
+        p.setBrush(gradient);p.setPen(QPen(QColor('#53606f'),1));p.drawRoundedRect(rect,25,25)
+        edge=QLinearGradient(rect.topLeft(),rect.topRight());edge.setColorAt(0,QColor(255,255,255,8));edge.setColorAt(.5,QColor(255,255,255,85));edge.setColorAt(1,QColor(255,255,255,8));p.setPen(QPen(edge,1));p.drawLine(QPointF(24,2),QPointF(self.width()-24,2));p.end()
 
 
 class Toggle(QCheckBox):
@@ -50,6 +86,22 @@ class Toggle(QCheckBox):
         p.setPen(Qt.PenStyle.NoPen);p.setBrush(QColor("#ffd76b" if self.isChecked() else "#424242"));p.drawRoundedRect(QRectF(0,5,36,20),10,10)
         p.setBrush(QColor("#171717" if self.isChecked() else "#bcbcbc"));p.drawEllipse(QRectF(19 if self.isChecked() else 3,8,14,14))
         p.setPen(QColor("#e5e5e5" if self.isEnabled() else "#777777"));p.drawText(self.rect().adjusted(46,0,0,0),Qt.AlignmentFlag.AlignVCenter,self.text());p.end()
+
+class ShutterButton(QPushButton):
+    def __init__(self,photo=True):
+        super().__init__();self.photo=photo;self.recording=False;self.setObjectName('shutter');self.setFixedSize(78,78)
+        self.setAccessibleName('Снять фото' if photo else 'Начать запись');self.setToolTip(self.accessibleName())
+    def set_recording(self,value):
+        if self.recording!=value:self.recording=value;self.update()
+        self.setAccessibleName('Остановить запись' if value else 'Снять фото' if self.photo else 'Начать запись');self.setToolTip(self.accessibleName())
+    def paintEvent(self,event):
+        p=QPainter(self);p.setRenderHint(QPainter.RenderHint.Antialiasing);r=QRectF(self.rect()).adjusted(4,4,-4,-4)
+        p.setPen(QPen(QColor('#d3dbe6') if self.isEnabled() else QColor('#5b6571'),2));p.setBrush(Qt.BrushStyle.NoBrush);p.drawEllipse(r)
+        color=QColor('#f0f3f7') if self.photo else QColor('#ff625e');color.setAlpha(255 if self.isEnabled() else 80);p.setPen(Qt.PenStyle.NoPen);p.setBrush(color)
+        if self.recording:p.drawRoundedRect(QRectF(25,25,28,28),7,7)
+        else:p.drawEllipse(r.adjusted(6,6,-6,-6))
+        p.end()
+
 
 THEME="""
 QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#080808;color:#f4f4f4}
@@ -268,3 +320,41 @@ QTabBar::tab:selected {background:#202020;color:#ffd24a;border-bottom:2px solid 
 """
 
 THEME += "QWidget#deviceCards {background:#111111} QSplitter::handle {background:#070707} QLabel#emptyMonitor {background:#101010} QScrollArea {background:#070707}"
+
+# Glass Camera: a quiet content layer, rounded functional surfaces and restrained gold.
+THEME += """
+QMainWindow,QWidget#root,QWidget#cameraGrid {background:#090c10;color:#f4f5f7}
+QDialog {background:transparent;color:#f4f5f7}
+QWidget {font-family:'Segoe UI';font-size:13px;color:#e9edf3}
+QWidget#tile {background:#10161e;border:1px solid #313d4a;border-radius:19px}
+QFrame#surface,QWidget#surface {background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #222d3a,stop:1 #151c25);border:1px solid #3a4654;border-radius:22px}
+QPushButton {background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2b3745,stop:1 #1d2733);border:1px solid #44505f;border-radius:17px;padding:9px 13px;min-height:19px;color:#e8ecf2}
+QPushButton:hover {background:#374657;border-color:#7c8999;color:#ffffff}
+QPushButton:pressed {background:#495767}
+QPushButton:disabled {background:#1a2028;color:#727d8b;border-color:#303945}
+QPushButton#primary {background:#f1d578;color:#111820;border:1px solid #f1d578;border-radius:18px;font-weight:600}
+QPushButton#navigation {border:0;background:transparent;border-radius:17px;padding:9px 15px;color:#b6bfcb}
+QPushButton#navigation:checked {background:#303b48;border:0;color:#f1d578}
+QPushButton#readout {background:#202c39;border:1px solid #4a5665;border-radius:16px;color:#f1d578;padding:10px 12px;font-family:Consolas;font-size:14px}
+QPushButton#cameraChoice {background:#19222d;border:1px solid #394656;border-radius:15px;text-align:left;padding:9px 12px;min-height:44px}
+QPushButton#cameraChoice:checked {border-color:#f1d578;color:#f1d578;background:#27313b}
+QPushButton#sensorChip {background:#273443;border:1px solid #4a586a;border-radius:14px;color:#dce4ee;padding:8px 5px;min-height:20px}
+QPushButton#sensorChip:checked {background:#f1d578;border-color:#f1d578;color:#111820}
+QPushButton#sheetClose {background:#35414e;border:0;border-radius:16px;min-width:32px;max-width:32px;min-height:32px;max-height:32px;padding:0;color:#e8edf4;font-size:18px}
+QPushButton#shutter {background:transparent;border:0;border-radius:39px;min-width:78px;max-width:78px;min-height:78px;max-height:78px;padding:0}
+QLabel#sensorHero {font-size:48px;font-weight:300;color:#f1d578;padding:9px 0;font-family:'Segoe UI Light','Segoe UI'}
+QLabel#sheetTitle {font-size:19px;font-weight:600;color:#f4f5f7}
+QLabel#eyebrow {font-size:11px;letter-spacing:2px;color:#c0c9d5}
+QLabel#muted {color:#b0bac8}
+QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#16202c;border:1px solid #3e4b5c;border-radius:13px;color:#e9edf3;padding:8px 10px}
+QScrollArea {background:transparent;border:0} QWidget#deviceCards {background:transparent}
+QSlider::groove:horizontal {height:5px;background:#475565;border:0;border-radius:2px}
+QSlider::sub-page:horizontal {background:#f1d578;border:0;border-radius:2px}
+QSlider::handle:horizontal {width:21px;height:21px;margin:-8px 0;background:#f1d578;border:1px solid #f9e6a6;border-radius:11px}
+QMenuBar,QMenu {background:#111821;color:#e9edf3}
+QTabBar::tab {background:transparent;color:#b3bfcd;border:0;border-radius:14px;padding:10px 15px}
+QTabBar::tab:selected {background:#303d4c;border:0;color:#f1d578}
+QWidget#settingsPage,QTabWidget::pane,QStackedWidget {background:transparent;border:0}
+QSplitter::handle {background:#090c10;width:14px}
+QLabel#emptyMonitor {background:#121b25;color:#b0bdcb;border:1px solid #334252;border-radius:20px}
+"""

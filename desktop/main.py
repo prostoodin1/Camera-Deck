@@ -129,8 +129,8 @@ class CameraTile(QWidget):
                 widget=row.itemAt(i).widget()
                 if widget:widget.hide();self.details.append(widget)
         self.group.hide()
-        rail=QHBoxLayout();select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
-        self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:(self.photo if self.status.get("mode")=="photo" else self.record).click());rail.addWidget(self.quick_record);box.addLayout(rail)
+        self.quick_rail=QWidget();rail=QHBoxLayout(self.quick_rail);rail.setContentsMargins(0,0,0,0);select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
+        self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:(self.photo if self.status.get("mode")=="photo" else self.record).click());rail.addWidget(self.quick_record);box.addWidget(self.quick_rail)
 
     def focus_at(self,x,y):
         for face in getattr(self.client,'live_tracking',{}).get('faces',self.status.get('faces',[])):
@@ -381,34 +381,8 @@ class CameraTile(QWidget):
         self.window.run(lambda:self.client.command(action,**kwargs),done,failed)
 
     def quick_sensor(self,kind,anchor):
-        s=self.status
-        if not s:return
-        dialog=GlassSheet(self.window);dialog.setMinimumWidth(360);layout=QVBoxLayout(dialog);layout.setContentsMargins(24,24,24,24);layout.setSpacing(18)
-        title=QLabel({"iso":"Чувствительность ISO","shutter":"Выдержка","focus":"Фокус"}[kind]);title.setStyleSheet("font-size:19px;font-weight:600");layout.addWidget(title)
-        auto=Toggle("Автоматически");auto.setChecked(s.get("focus",-1)<0 if kind=="focus" else not s.get("manualIso"));layout.addWidget(auto)
-        supported=bool(s.get("focusMax")) if kind=="focus" else s.get("manualSensor",False)
-        if kind=="iso":field=SliderField(s.get("isoMin",50),s.get("isoMax",6400),s.get("manualIso") or s.get("iso",100),0,True)
-        elif kind=="shutter":
-            maximum=s.get("exposureMaxNs",100000000)/1e6
-            if s.get("mode")=="video":maximum=min(maximum,1000/max(1,s.get("videoFps",30)))
-            field=SliderField(max(.0001,s.get("exposureMinNs",1000)/1e6),maximum,(s.get("manualExposureNs") or s.get("exposureNs",10000000))/1e6,3,True)
-            layout.addWidget(QLabel("Миллисекунды"))
-        else:field=SliderField(0,s.get("focusMax") or 0,max(0,s.get("focus",-1)),2)
-        layout.addWidget(field);auto.setEnabled(supported);field.setEnabled(supported and not auto.isChecked());auto.toggled.connect(lambda checked:field.setEnabled(supported and not checked))
-        if not supported:layout.addWidget(QLabel("Ручная настройка не предоставлена этой камерой"))
-        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Применить");buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Закрыть")
-        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
-        dialog.adjustSize();point=anchor.mapToGlobal(QPoint(0,anchor.height()+8));screen=QApplication.screenAt(point) or QApplication.primaryScreen();bounds=screen.availableGeometry()
-        dialog.move(max(bounds.left(),min(point.x(),bounds.right()-dialog.width())),point.y() if point.y()+dialog.height()<bounds.bottom() else anchor.mapToGlobal(QPoint()).y()-dialog.height()-8)
-        if dialog.exec()!=QDialog.DialogCode.Accepted or not supported:return
-        iso=s.get("manualIso",0);exposure=s.get("manualExposureNs",0);focus=s.get("focus",-1)
-        if kind=="focus":focus=-1 if auto.isChecked() else field.value()
-        elif auto.isChecked():iso=0;exposure=0
-        else:
-            iso=field.value() if kind=="iso" else (iso or s.get("iso") or s.get("isoMin",100))
-            exposure=round(field.value()*1e6) if kind=="shutter" else (exposure or s.get("exposureNs") or 10000000)
-        self.command("settings",iso=iso,exposureNs=exposure,focus=focus)
+        import sensor_controls
+        sensor_controls.show(self,kind,anchor)
 
     def settings(self,initial_tab=0):
         if not self.status: return
@@ -809,6 +783,9 @@ class Window(QMainWindow):
     def rebuild(self):
         self.refresh_devices()
         if hasattr(self,"studio"):self.studio.refresh()
+        selected_only=hasattr(self,'studio') and self.studio.workspace==1
+        self.grid.setAlignment(Qt.AlignmentFlag(0) if selected_only else Qt.AlignmentFlag.AlignTop)
+        if self.tiles and not self.studio.devices_collapsed:self.devices_button.setChecked(False);self.studio.devices_collapsed=True
         self.connection_count.setText(f"Камер: {len(self.tiles)}" if self.tiles else "Нет подключённых камер")
         current = self.filter.currentText()
         groups = sorted({tile.group.text().strip() or "Общая" for tile in self.tiles})
@@ -818,7 +795,8 @@ class Window(QMainWindow):
         if not self.tiles: self.grid.addWidget(self.empty,0,0)
         index = 0; columns = self.columns.currentIndex()+1
         for tile in self.tiles:
-            visible = self.filter.currentText() == "Все группы" or self.filter.currentText() == (tile.group.text().strip() or "Общая")
+            visible = tile is self.studio.selected if selected_only else self.filter.currentText() == "Все группы" or self.filter.currentText() == (tile.group.text().strip() or "Общая")
+            tile.quick_rail.setVisible(not selected_only)
             tile.setVisible(visible)
             tile.set_preview_active(visible and not self.isMinimized() and (not hasattr(self,"studio") or self.studio.workspace<2))
             if visible: self.grid.addWidget(tile,index//columns,index%columns); index += 1
@@ -941,6 +919,20 @@ def main():
         app.processEvents()
         assert window.empty.isVisible() and window.device_list.count()==0
         assert window.grab().save(str(out/"windows-preview.png"))
+        from types import SimpleNamespace
+        import sensor_controls
+        probe=SimpleNamespace(window=window,name=QLabel('Тестовый сенсор · без телефона'),status=dict(cameraId='fixture',mode='photo',manualSensor=True,isoMin=50,isoMax=6400,iso=100,exposureNs=10000000,focus=-1),failures=0,stopped=threading.Event())
+        original_exec=QDialog.exec
+        def capture_sensor(dialog):
+            for chip in dialog.findChildren(QPushButton):
+                if chip.property('sensorValue')==400:chip.click()
+            dialog.show();app.processEvents()
+            assert dialog.grab().save(str(out/'windows-iso.png'))
+            assert dialog.findChild(QLabel,'sensorHero').text()=='400'
+            dialog.reject();return QDialog.DialogCode.Rejected
+        QDialog.exec=capture_sensor
+        try:sensor_controls.show(probe,'iso',window.install_button)
+        finally:QDialog.exec=original_exec
         marker=out/'updater-process-started.txt';marker.unlink(missing_ok=True)
         escaped=str(marker.resolve()).replace("'","''")
         executable=str(Path(sys.executable).resolve()).replace("'","''")
@@ -948,7 +940,7 @@ def main():
         deadline=time.monotonic()+20
         while time.monotonic()<deadline and not marker.is_file():app.processEvents();time.sleep(.05)
         assert marker.is_file() and marker.read_text()=='started','Packaged updater could not start; inspect update-launch.log'
-        (out/"windows-self-test.json").write_text(json.dumps({"version":updates.VERSION,"rendered":True,"updaterProcessStarted":True,"hardwareTested":False}))
+        (out/"windows-self-test.json").write_text(json.dumps({"version":updates.VERSION,"rendered":True,"sensorControlsRendered":True,"updaterProcessStarted":True,"hardwareTested":False}))
         window.close()
         return 0
     return app.exec()
