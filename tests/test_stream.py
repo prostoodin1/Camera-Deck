@@ -54,3 +54,23 @@ def test_revoked_session_is_not_treated_as_old_phone(monkeypatch):
     with pytest.raises(ConnectionError) as error:next(frames)
     assert not isinstance(error.value,StreamUnavailable)
     assert conn.closed
+
+
+def test_tracking_metadata_reaches_client_and_missing_header_clears_it(monkeypatch):
+    import base64,json
+    metadata={'faces':[{'id':4,'left':.1,'top':.2,'right':.4,'bottom':.6}],'trackingStamp':12}
+    header=base64.b64encode(json.dumps(metadata).encode())
+    frames,conn=stream(monkeypatch,b'--aurora\r\nContent-Length: 1\r\nX-Tracking: '+header+b'\r\n\r\nA\r\n--aurora\r\nContent-Length: 1\r\n\r\nB\r\n')
+    assert next(frames)==(b'A',0)
+    client=frames.gi_frame.f_locals['self']
+    assert client.live_tracking==metadata
+    assert next(frames)==(b'B',0)
+    assert client.live_tracking=={}
+    frames.close();assert conn.closed
+
+
+@pytest.mark.parametrize('header',[b'!',b'e30='*7000])
+def test_tracking_rejects_invalid_or_oversized_metadata(monkeypatch,header):
+    frames,conn=stream(monkeypatch,b'--aurora\r\nContent-Length: 1\r\nX-Tracking: '+header+b'\r\n\r\nA')
+    with pytest.raises(ValueError):next(frames)
+    assert conn.closed

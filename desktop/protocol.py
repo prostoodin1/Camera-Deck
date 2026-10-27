@@ -1,6 +1,7 @@
 """Local protocol. TLS identity is checked BEFORE sending the PIN or token."""
 from __future__ import annotations
 import hashlib
+import base64
 import http.client
 import ipaddress
 import json
@@ -40,7 +41,7 @@ def discover(seconds: float = 2.0) -> list[dict]:
                 network = ipaddress.ip_network(f"{interface['IPAddress']}/{interface['PrefixLength']}", strict=False)
                 if network.is_private and not network.is_loopback:
                     targets.add(str(network.broadcast_address))
-        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
             pass
         for target in targets:
             try:
@@ -52,8 +53,9 @@ def discover(seconds: float = 2.0) -> list[dict]:
             try:
                 data, (host, _) = sock.recvfrom(4096)
                 item = json.loads(data)
+                if not isinstance(item,dict):continue
                 fp = item.get("fingerprint", "")
-                if item.get("protocol") != 1 or len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
+                if item.get("protocol") != 1 or not isinstance(fp,str) or len(fp) != 64 or any(c not in "0123456789abcdef" for c in fp):
                     continue
                 if item.get("port") != 39812 or not isinstance(item.get("id"), str):
                     continue
@@ -66,8 +68,13 @@ def discover(seconds: float = 2.0) -> list[dict]:
 
 
 class CameraClient:
-    def __init__(self, host: str, fingerprint: str = ""):
-        self.host = local_host(host)
+    def __init__(self, host: str, fingerprint: str = "", *, port: int = 39812, transport: str = "lan"):
+        if transport not in ('lan','usb'):raise ValueError('Unknown transport')
+        if transport=='usb' and host!='127.0.0.1':raise ValueError('USB tunnel must use loopback')
+        if not isinstance(port,int) or isinstance(port,bool) or not 1<=port<=65535:raise ValueError('Invalid port')
+        if transport=='lan' and port!=39812:raise ValueError('Unexpected LAN port')
+        self.host = host if transport=='usb' else local_host(host)
+        self.port=port;self.transport=transport
         self.fingerprint = fingerprint.replace(" ", "").lower()
         self.token = ""
         self.refresh_secret="";self.session_lock=threading.Lock()
@@ -77,7 +84,7 @@ class CameraClient:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE  # explicit certificate pin below
         context.minimum_version = ssl.TLSVersion.TLSv1_2
-        conn = http.client.HTTPSConnection(self.host, 39812, timeout=8, context=context)
+        conn = http.client.HTTPSConnection(self.host, self.port, timeout=8, context=context)
         try:
             try:
                 conn.connect()
@@ -116,14 +123,20 @@ class CameraClient:
                 if line.strip()!=b"--aurora":raise ValueError("Повреждена граница видеопотока")
                 headers={};total=0
                 while True:
-                    line=response.readline(4096);total+=len(line)
-                    if not line or total>16384:raise ValueError("Повреждены заголовки видеопотока")
+                    line=response.readline(32769);total+=len(line)
+                    if not line or len(line)>32768 or total>65536:raise ValueError("Повреждены заголовки видеопотока")
                     if line==b"\r\n":break
                     key,value=line.decode("ascii").split(":",1);headers[key.lower()]=value.strip()
                 size=int(headers.get("content-length","0"))
                 if not 0<size<=2_000_000:raise ValueError("Недопустимый размер видеокадра")
                 frame=response.read(size)
                 if len(frame)!=size:raise ConnectionError("Видеокадр получен не полностью")
+                metadata={}
+                if headers.get("x-tracking"):
+                    if len(headers["x-tracking"])>24000:raise ValueError("Слишком много метаданных лиц")
+                    metadata=json.loads(base64.b64decode(headers["x-tracking"],validate=True))
+                    if not isinstance(metadata,dict) or not isinstance(metadata.get("faces",[]),list) or len(metadata.get("faces",[]))>30:raise ValueError("Некорректные метаданные лиц")
+                self.live_tracking=metadata
                 yield frame,int(headers.get("x-rotation","0"))%360
         finally:conn.close()
 
@@ -183,6 +196,7 @@ class CameraClient:
         if target.exists():
             raise FileExistsError(f"Файл уже существует: {filename}")
         partial = target.with_suffix(target.suffix + ".partial")
+        owns_partial=False
         conn = self.connection()
         try:
             conn.request("GET", "/file?" + urlencode({"name": filename}), headers={"Authorization": "Bearer " + self.token})
@@ -194,6 +208,7 @@ class CameraClient:
                 raise ValueError("Неизвестный размер файла")
             count = 0
             with partial.open("xb") as out:
+                owns_partial=True
                 while chunk := response.read(256 * 1024):
                     out.write(chunk)
                     count += len(chunk)
@@ -202,10 +217,11 @@ class CameraClient:
             if count != expected:
                 raise ValueError("Файл скачан не полностью")
             partial.rename(target)
+            owns_partial=False
             return target
         finally:
             conn.close()
-            partial.unlink(missing_ok=True)
+            if owns_partial:partial.unlink(missing_ok=True)
 
     def send_update(self, apk: Path, envelope: bytes) -> None:
         import base64

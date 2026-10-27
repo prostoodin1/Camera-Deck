@@ -93,7 +93,8 @@ public class CameraService extends Service {
             startForeground(1,notification("opening"),types);
         } else startForeground(1,notification("opening"));
         if (running) return START_NOT_STICKY;
-        active = this; lastStartupError = "";
+        if(UpdateInstaller.committing){stopSelf();return START_NOT_STICKY;}
+        PortraitService.pauseForCamera();active = this; lastStartupError = "";
         try {
             id = getSharedPreferences("deck", 0).getString("id", "");
             if (id.isEmpty()) { id = UUID.randomUUID().toString(); getSharedPreferences("deck", 0).edit().putString("id", id).apply(); }
@@ -169,7 +170,7 @@ public class CameraService extends Service {
         @Override public Response serve(IHTTPSession s) {
             try {
                 InetAddress remote = InetAddress.getByName(s.getRemoteIpAddress());
-                if (!remote.isSiteLocalAddress() && !remote.isLinkLocalAddress()) return error(Response.Status.FORBIDDEN, "Local network only");
+                if (!remote.isSiteLocalAddress() && !remote.isLinkLocalAddress() && !remote.isLoopbackAddress()) return error(Response.Status.FORBIDDEN, "Local network / USB only");
                 String uri = s.getUri();
                 if(uri.equals("/resume")&&s.getMethod()==Method.POST){
                     String owner=trusted.authenticate(body(s).optString("rememberToken"));
@@ -246,7 +247,8 @@ public class CameraService extends Service {
                                     if(camera.frameSequence==sequence||camera.frame.length==0){try{camera.frameReady.wait(500);}catch(InterruptedException e){Thread.currentThread().interrupt();close();return -1;}continue;}
                                     sequence=camera.frameSequence;jpeg=camera.frame;
                                 }
-                                byte[] header=("--aurora\r\nContent-Type: image/jpeg\r\nContent-Length: "+jpeg.length+"\r\nX-Rotation: "+camera.rotation+"\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+                                String tracking="e30=";try{tracking=android.util.Base64.encodeToString(camera.trackingStatus().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);if(tracking.length()>24000)tracking="e30=";}catch(Exception metadataError){camera.trackingError=String.valueOf(metadataError.getMessage());}
+                                byte[] header=("--aurora\r\nContent-Type: image/jpeg\r\nContent-Length: "+jpeg.length+"\r\nX-Rotation: "+camera.rotation+"\r\nX-Tracking: "+tracking+"\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII);
                                 part=new byte[header.length+jpeg.length+2];System.arraycopy(header,0,part,0,header.length);System.arraycopy(jpeg,0,part,header.length,jpeg.length);part[part.length-2]=13;part[part.length-1]=10;offset=0;
                             }
                             int n=Math.min(len,part.length-offset);System.arraycopy(part,offset,b,off,n);offset+=n;return n;
@@ -317,8 +319,9 @@ public class CameraService extends Service {
                         File incoming = new File(files.get("content"));
                         UpdateVerifier.stage(CameraService.this, envelope, incoming);
                     } finally { transfers.decrementAndGet(); updatePower(); }
-                    updateMessage = "Обновление готово. Нажмите «Установить обновление» на телефоне.";
-                    return json(Response.Status.OK, new JSONObject().put("staged", true).put("userConfirmationRequired", true));
+                    updateMessage = "Патч проверен. Установка при простое камеры.";
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(()->UpdateInstaller.install(CameraService.this,false),1000);
+                    return json(Response.Status.OK, new JSONObject().put("staged", true).put("installationDeferredUntilIdle", true));
                 }
                 return error(Response.Status.NOT_FOUND, "Unknown endpoint");
             } catch (Exception e) { Throwable cause = e.getCause() == null ? e : e.getCause(); return error(Response.Status.BAD_REQUEST, String.valueOf(cause.getMessage())); }

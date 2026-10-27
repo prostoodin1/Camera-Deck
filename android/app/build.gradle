@@ -1,5 +1,6 @@
 plugins { id 'com.android.application' }
 def releaseVersion = new groovy.json.JsonSlurper().parse(file('../../version.json'))
+def clientBuild = providers.gradleProperty('cameraDeckClient').orNull == 'true'
 def previewBuild = providers.gradleProperty('cameraDeckPreview').orNull == 'true'
 android {
     namespace 'io.github.prostoodin1.cameradeck'
@@ -13,6 +14,7 @@ android {
         versionName releaseVersion.version
         buildConfigField 'int', 'PROTOCOL_VERSION', '1'
         buildConfigField 'boolean', 'PREVIEW_BUILD', 'false'
+        buildConfigField 'boolean', 'CLIENT_CHANNEL', 'false'
         manifestPlaceholders = [appLabel: 'Camera Deck']
     }
     buildFeatures { buildConfig true }
@@ -22,26 +24,33 @@ android {
             if (System.getenv('CAMERA_DECK_KEYSTORE')) {
                 storeFile file(System.getenv('CAMERA_DECK_KEYSTORE'))
                 storePassword System.getenv('CAMERA_DECK_STORE_PASSWORD')
-                keyAlias 'camera-deck'
+                keyAlias System.getenv('CAMERA_DECK_KEY_ALIAS') ?: 'camera-deck'
                 keyPassword System.getenv('CAMERA_DECK_STORE_PASSWORD')
             }
         }
     }
     buildTypes {
         debug {
-            if (previewBuild) {
-                applicationIdSuffix '.aurora'
+            if (clientBuild || previewBuild) {
+                applicationIdSuffix clientBuild ? '.aurora.dev' : '.aurora'
                 versionNameSuffix '-slate-preview'
                 buildConfigField 'boolean', 'PREVIEW_BUILD', 'true'
-                manifestPlaceholders = [appLabel: 'Camera Deck Slate']
+                buildConfigField 'boolean', 'CLIENT_CHANNEL', clientBuild ? 'true' : 'false'
+                manifestPlaceholders = [appLabel: clientBuild ? 'Camera Deck Dev' : 'Camera Deck Slate']
             }
         }
-        release { signingConfig signingConfigs.release; minifyEnabled false }
+        release {
+            signingConfig signingConfigs.release; minifyEnabled false
+            if(clientBuild){applicationIdSuffix '.aurora';buildConfigField 'boolean','PREVIEW_BUILD','true';buildConfigField 'boolean','CLIENT_CHANNEL','true';manifestPlaceholders=[appLabel:'Camera Deck']}
+        }
     }
 }
 dependencies {
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'com.google.mlkit:face-detection:16.1.7'
+    implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
+    implementation 'androidx.media3:media3-transformer:1.8.1'
+    implementation 'androidx.media3:media3-effect:1.8.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
 }

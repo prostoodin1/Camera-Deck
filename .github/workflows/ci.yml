@@ -10,7 +10,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install -r desktop/requirements.txt pytest pyinstaller
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+      - run: python -m pip install -r desktop/requirements.txt -r scripts/requirements-build.txt
       - run: python -m pytest tests -q
       - run: python scripts/collect_licenses.py
       - run: python scripts/build_windows.py

@@ -25,10 +25,11 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"desktop"))
 from PyQt6.QtCore import QBuffer,QByteArray,QIODevice,QTimer,Qt
 from PyQt6.QtGui import QImage,QPainter,QColor,QFont,QFontDatabase
-from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget
+from PyQt6.QtWidgets import QApplication,QDialog,QComboBox,QTabWidget,QPushButton
 from main import Window,CameraTile
 from protocol import CameraClient
 from updates import VERSION,VERSION_CODE
+import updates
 
 
 def fixture(index):
@@ -60,7 +61,9 @@ class State:
     def status(self):
         return {"ready":True,"recording":self.recording,"error":"ТЕСТОВЫЙ СТЕНД · Android не подключён","cameraId":"0","rotation":0,"frameTime":int(time.time()*1000),
             "frameSequence":int(time.time()*10),"iso":100 if self.index==0 else 200,"exposureNs":10000000,"manualIso":0,"manualExposureNs":0,"focus":-1,
-            "lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
+            "audioInputs":[{"id":1,"name":"Микрофон телефона · симулятор"},{"id":2,"name":"USB-микрофон · симулятор"}],"audioInput":0,"audioRoutedName":"Микрофон телефона · симулятор","lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
+            "imageControls":{"ev":0,"evMin":-2,"evMax":2,"evStep":.333333,"aeLockAvailable":True,"whiteBalance":1,"whiteBalanceModes":[1,2,5,6],"antiBanding":3,"antiBandingModes":[0,1,2,3],"filter":0,"filters":[0,1,4],"meteringAvailable":True,"metering":0,"contrast":1,"gamma":1,"toneCurveAvailable":True,"apertures":[1.8],"aperture":0,"backgroundBlur":0},
+            "tracking":True,"trackingShape":"corners","focusTarget":"face","faceLimit":12,"selectedFaceId":-1,
             "mode":self.mode,"videoWidth":self.width,"videoHeight":self.height,"videoFps":self.fps,"photoWidth":4000,"photoHeight":3000,"photoFormat":self.photoFormat,
             "powerState":"record_preview" if self.recording else "preview","eco":False,"previewFps":24,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
             "cameras":[{"id":"0","facing":1},{"id":"1","facing":0}],"captureCapabilities":{"videoModes":[{"width":1280,"height":720,"fps":[30,60]},{"width":1920,"height":1080,"fps":[30,60]},{"width":3840,"height":2160,"fps":[30]}],
@@ -115,11 +118,13 @@ def handler(state):
 
 
 def main():
+    demo_data=tempfile.TemporaryDirectory(prefix='camera-deck-demo-settings-')
+    updates.DATA=Path(demo_data.name)
     app=QApplication([])
     font=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts/segoeui.ttf"
     if font.is_file():QFontDatabase.addApplicationFont(str(font))
     app.setFont(QFont("Segoe UI",10))
-    out=ROOT/"docs/screenshots";out.mkdir(parents=True,exist_ok=True)
+    out=Path(os.environ.get('CAMERA_DECK_SCREENSHOTS',str(ROOT/'docs/screenshots')));out.mkdir(parents=True,exist_ok=True)
     key=ec.generate_private_key(ec.SECP256R1());name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"CameraDeck loopback simulator")]);now=datetime.datetime.now(datetime.timezone.utc)
     cert=x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(minutes=1)).not_valid_after(now+datetime.timedelta(days=1)).sign(key,hashes.SHA256())
     fingerprint=hashlib.sha256(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
@@ -150,6 +155,7 @@ def main():
             window.tiles[0].client.download(filename,folder)
             window.tiles[1].client.command("capture_config",mode="video",videoWidth=3840,videoHeight=2160,videoFps=30)
             window.tiles[1].client.command("record_start")
+            window.studio.select(window.tiles[1]);window.studio.navigate(1)
         def capture_recording():
             screenshot("02-video-control-simulator.png")
             original=QDialog.exec
@@ -163,9 +169,29 @@ def main():
             tile=window.tiles[0];tile.open_fullscreen();app.processEvents();assert tile.fullscreen.isFullScreen();assert not window.isFullScreen()
             assert tile.fullscreen.grab().save(str(out/"05-fullscreen-monitor.png"));tile.fullscreen.reject();app.processEvents()
             def capture_popup(dialog):
+                from appearance import Toggle
+                automatic=dialog.findChild(Toggle)
+                if automatic:automatic.setChecked(False)
+                for chip in dialog.findChildren(QPushButton):
+                    if chip.property('sensorValue')==400:chip.click()
                 dialog.show();app.processEvents();assert dialog.grab().save(str(out/"06-iso-popover.png"));return QDialog.DialogCode.Rejected
             QDialog.exec=capture_popup
             try:tile.quick_sensor("iso",tile.iso_readout)
+            finally:QDialog.exec=original
+            def capture_audio(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'07-audio-routing-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_audio
+            try:tile.audio_settings()
+            finally:QDialog.exec=original
+            def capture_image(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'08-image-controls-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_image
+            try:tile.image_settings()
+            finally:QDialog.exec=original
+            def capture_faces(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'09-face-controls-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_faces
+            try:tile.framing_settings()
             finally:QDialog.exec=original
             states[1].recording=False
             for tile in window.tiles:tile.status["recording"]=False;tile.stopped.set();tile.monitor.stop()
@@ -174,6 +200,7 @@ def main():
         result=app.exec()
         for server in servers:server.shutdown();server.server_close()
     print(json.dumps({"screenshots":[str(p) for p in sorted(out.glob("*.png"))],"realPhonesTested":False,"tlsPairingAndJpegTransferTested":True},ensure_ascii=False))
+    demo_data.cleanup()
     return result
 
 

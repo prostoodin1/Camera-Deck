@@ -67,3 +67,20 @@ def test_active_pc_recording_cannot_be_orphaned_by_disconnect(tmp_path,monkeypat
     window.studio.pc_jobs[id(tile)]={'state':'complete'};window.remove(tile)
     assert tile not in window.tiles and id(tile) not in window.studio.pc_jobs
     window.close()
+
+
+def test_camera_strip_switches_preview_without_stopping_phone_recording(tmp_path,monkeypatch):
+    app,window=make_window(tmp_path,monkeypatch)
+    class Client:
+        def __init__(self,host):self.host=host;self.calls=[]
+        def command(self,*args,**kwargs):self.calls.append((args,kwargs))
+    a=CameraTile(window,Client('192.168.1.2'),'A');b=CameraTile(window,Client('192.168.1.3'),'B')
+    for tile in (a,b):tile.status=dict(ready=True,mode='video',recording=False);window.tiles.append(tile)
+    a.status['recording']=True
+    window.show();window.studio.navigate(1);window.rebuild();app.processEvents()
+    assert a.preview_enabled.is_set() and not b.preview_enabled.is_set()
+    window.studio.camera_choices[b].click();app.processEvents()
+    assert window.studio.selected is b and b.preview_enabled.is_set() and not a.preview_enabled.is_set()
+    assert a.status['recording'] and not a.client.calls and not b.client.calls
+    assert window.studio.record.width()==window.studio.record.height()==78
+    a.status['recording']=False;window.close()

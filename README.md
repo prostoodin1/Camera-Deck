@@ -1,12 +1,22 @@
-# Camera Deck · Slate
+# Camera Deck · Glass Camera
 
-Android cameras controlled from a Windows operator desk. **Slate 0.9.0 is an experimental prerelease**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical phone, Wi-Fi and USB validation remains necessary.
+Android cameras controlled from a Windows operator desk. **Glass Camera 0.12.2 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new client features remains necessary.
+
+0.12.0 was withdrawn after a Defender detection. 0.12.2 requires a hash-bound Defender report before publication; see [distribution checks and limitations](docs/WINDOWS-DISTRIBUTION-VALIDATION.ru.md). This is not a McAfee clearance or an Authenticode publisher signature.
+
+0.12 introduces a native dark camera workspace, camera filmstrip, round shutter, and ISO/exposure panels with AUTO, rulers and exact presets. See [design and validation limits](docs/GLASS-CAMERA.ru.md) and [native Windows screenshots](docs/screenshots/glass-camera/). The installed client and signed update channel stay the same.
+
+Install CameraDeck-Setup.exe on Windows and CameraDeck-Android.apk on Android once. Subsequent signed patches replace the same installation, preserving profiles and media. Windows installs into the user profile with one Start menu shortcut. Android retains the package and certificate of Slate 0.10.0; compatibility with older 0.9 signing identities is not established. The first migration from Slate 0.10 to Client is manual because the signed manifest channel changes. See [update lifecycle, system confirmation and rollback limits](docs/CLIENT-UPDATES.ru.md) and [release notes](CLIENT_RELEASE_NOTES.md).
+
+Client adds sensor EV/AE lock/metering, supported WB/antibanding/hardware filters, contrast/gamma, logarithmic ISO, smooth multiple-face markers and selectable eye targets. Gallery publication defaults to DCIM/Camera Deck with a private backup. Experimental person-mask blur produces separate JPEG/MP4 copies after capture; originals remain unchanged. Blur is off by default and requires device validation.
+
+0.10 adds USB cable connection without Wi-Fi (Android USB debugging and computer authorization required), phone audio-input selection, independent Windows audio-output/volume selection, keep-screen-on during foreground recording, and compact black/yellow controls. See [setup, validation and limitations](docs/SLATE-USB-AUDIO.ru.md). [Windows test-stand screenshots](docs/screenshots/slate-usb-audio/) use explicitly labelled simulators.
 
 ## Start
 
-Install `CameraDeck-Slate-Android.apk` over the existing Aurora/Prism/Orbit/Glide app; do not uninstall first. Run `CameraDeck-Slate-Windows.exe`, or extract the complete `CameraDeck-Slate-Windows-Portable.zip` and launch `CameraDeck-Portable.exe` with `_internal` beside it. Portable avoids Python extraction into `_MEI`; no Python installation is required.
+Install CameraDeck-Android.apk over Slate 0.10.0 with the matching signing certificate; do not uninstall first. Run CameraDeck-Setup.exe on Windows. No Python installation is required. Older portable releases remain historical downloads.
 
-Enable the camera on the phone, grant permissions and use a reachable local network. Find the phone on Windows or enter its IPv4 address. Compare the entire SHA-256 fingerprint before pairing with the PIN. Trust the computer for later reconnection; revoke trust when removing access. Android package `.aurora`, APK signing identity and signed-update product `camera-deck-aurora` remain unchanged.
+Enable the camera, grant permissions and connect through USB or local Wi-Fi. Compare the entire SHA-256 fingerprint before PIN pairing. Trust the computer for later reconnection; revoke trust when removing access. The client uses package .aurora and signed-update product camera-deck-client.
 
 ## Workspaces
 
@@ -31,6 +41,10 @@ Choose Video, a supported recording mode, then **Камера → Запись �
 
 **Phone backup is mandatory in Slate and still consumes phone/selected-phone-storage space. PC-only recording is not implemented.** Network/PC disk failures do not automatically stop the backup. Windows retains `.partial.mp4` plus a `.recording.json` journal. Recovery depends on readable completed fragments; it is not guaranteed before initialization or after arbitrary disk damage. Closing during capture warns that the PC copy will be interrupted.
 
+Since 0.9.1, interrupted PC capture switches to recovery rather than restarting the take. With both updated apps, a unique recording session identifies the matching phone backup. After the operator stops recording, Windows downloads that completed MP4 to the chosen filename; incomplete PC fragments are retained separately. Up to five minutes offline or five minutes of failed transfer retries are tolerated. Closing the PC app stops this recovery worker, not phone capture. Failed phone storage/codec finalization, missing storage, unavailable backup identity or insufficient PC space are reported explicitly; automatic recovery is not a guarantee against device/storage failure. Reconnection to a restarted service requires remembered pairing or a new manual pairing.
+
+Live audio monitoring is independent of VIEW and retries every two seconds while enabled and visible. Minimizing/hiding the view pauses monitoring only. Transient microphone exceptions generate marked silence while the microphone is retried; an overfull audio input queue discards stale blocks with a warning instead of aborting video. Lost sound cannot be reconstructed: counters/warnings remain visible. Fatal codec or storage errors can still stop capture. Neither uninterrupted audio nor A/V sync has been established on physical phones.
+
 The relay is bounded to 64 MB/8 MB per message and never waits on a slow network from the phone encoder. Windows checks disk capacity before/during recording. Android 10+ is required for disabling B-frames on the original relay; reordered encoder output explicitly terminates the PC copy. Android 9 keeps local phone recording.
 
 ## Capabilities, sound and storage
@@ -53,10 +67,10 @@ Foreground service/notification and demand-based timed wake lock support recordi
 
 ## Updates, builds, validation
 
-Both programs verify signed GitHub manifests (RSA/SHA-256), product/version and artifact hashes/sizes. APK package/certificate are checked; Android installation requires system approval. EXE/Portable updates retain previous copies and avoid active/uncertain recording. A non-starting old EXE needs one manual portable recovery.
+Both programs verify signed GitHub manifests (RSA/SHA-256), product/version and artifact hashes/sizes. APK package/certificate are checked. Android requires a one-time source permission and may request installation confirmation. Windows waits for capture and idle input, retains the previous EXE and restores it if the new interface fails its startup acknowledgement. Background Android checks run through JobScheduler; Windows can deliver signed APKs through USB/Wi-Fi. See the client update lifecycle for limits.
 
 Desktop: Python3.13, `pip install -r desktop/requirements.txt pytest pyinstaller`, `python scripts/collect_licenses.py`, `python scripts/build_windows.py`. Test: `python -m pytest tests -q`. Both executables accept `--self-test ABSOLUTE_OUTPUT_DIRECTORY`.
 
-Android: JDK17, Gradle8.7, SDK35/build-tools35. In `android`: `gradle --no-daemon -PcameraDeckPreview=true :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`. Re-sign published APKs with `scripts/sign_preview.py` and the existing persistent Aurora key; CI signing is not release signing. Stage EXE/APK/Portable ZIP and run `scripts/aurora_manifest.py`. Never replace existing APK/update keys.
+Android: JDK17, Gradle8.7, SDK35/build-tools35. scripts/build_client_android.py builds the permanent non-debuggable client using its adopted signing identity. client-release.yml validates both platforms and publishes signed client prereleases. The local protected identity and encrypted CI secrets must be retained; never replace existing APK/update keys.
 
-See [Slate implementation and validation report](docs/SLATE-REPORT.ru.md) for completed/partial features and physical tests. License GPL-3.0-only; [third-party notices](THIRD_PARTY_NOTICES.md).
+The [Slate report](docs/SLATE-REPORT.ru.md) describes a historical build and does not validate new client features on physical devices. License GPL-3.0-only; [third-party notices](THIRD_PARTY_NOTICES.md).

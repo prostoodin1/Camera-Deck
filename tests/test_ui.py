@@ -95,14 +95,35 @@ def test_iso_popup_keeps_exposure_paired_with_manual_iso(tmp_path,monkeypatch):
         host="192.168.1.2"
         def command(self,action,**values):commands.append((action,values))
     tile=CameraTile(window,Client(),"Phone");tile.status={"manualSensor":True,"isoMin":50,"isoMax":3200,"iso":100,"exposureNs":10000000,"focus":-1}
-    window.run=lambda fn,callback:callback(fn())
+    window.run=lambda fn,callback,failure=None:callback(fn())
     def choose(dialog):
         dialog.findChild(Toggle).setChecked(False)
         dialog.findChild(SliderField).slider.setValue(10000)
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(QDialog,"exec",choose)
     tile.quick_sensor("iso",tile.iso_readout)
-    assert commands==[("settings",{"iso":3200,"exposureNs":10000000,"focus":-1})]
+    assert commands==[("settings",{"iso":3200,"exposureNs":10000000})]
+    tile.stopped.set();tile.monitor.stop();window.close()
+
+
+def test_sensor_sheet_waits_for_apply_and_rejects_stale_camera(tmp_path,monkeypatch):
+    import updates,threading
+    from PyQt6.QtWidgets import QDialog,QPushButton
+    monkeypatch.setattr(updates,'DATA',tmp_path);monkeypatch.setattr(threading.Thread,'start',lambda self:None)
+    window=Window(auto_checks=False);commands=[];messages=[]
+    class Client:
+        host='192.168.1.2'
+        def command(self,action,**values):commands.append((action,values))
+    tile=CameraTile(window,Client(),'Phone');tile.status={'cameraId':'0','mode':'video','videoFps':30,'manualSensor':True,'isoMin':50,'isoMax':3200,'iso':100,'exposureNs':10000000}
+    window.run=lambda fn,callback,failure=None:callback(fn());window.message=lambda *args:messages.append(args)
+    def choose(dialog):
+        chip=next(b for b in dialog.findChildren(QPushButton) if b.property('sensorValue')==800)
+        chip.click();assert not commands
+        tile.status=dict(tile.status,cameraId='1')
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(QDialog,'exec',choose)
+    tile.quick_sensor('iso',tile.iso_readout)
+    assert not commands and messages
     tile.stopped.set();tile.monitor.stop();window.close()
 
 
@@ -168,7 +189,7 @@ def test_preview_pauses_for_hidden_group_and_minimized_window(tmp_path,monkeypat
     other.group.setText("Другая")
     other.status={"recording":False}
     window.tiles.append(other)
-    window.show(); window.rebuild(); app.processEvents()
+    window.studio.navigate(0);window.show(); window.rebuild(); app.processEvents()
     assert tile.preview_enabled.is_set() and other.preview_enabled.is_set()
     window.filter.setCurrentText("Общая"); app.processEvents()
     assert tile.preview_enabled.is_set() and not other.preview_enabled.is_set()
