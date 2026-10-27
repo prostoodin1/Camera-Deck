@@ -14,6 +14,10 @@ def environment():
 def popen(args,**kwargs):
     kwargs.setdefault('env',environment())
     kwargs.setdefault('creationflags',getattr(subprocess,'CREATE_NO_WINDOW',0))
+    # Windowed executables can inherit invalid console handles.
+    kwargs.setdefault('stdin',subprocess.DEVNULL)
+    kwargs.setdefault('stdout',subprocess.DEVNULL)
+    kwargs.setdefault('stderr',subprocess.DEVNULL)
     with _launch_lock:
         frozen=sys.platform=='win32' and getattr(sys,'frozen',False)
         previous=None

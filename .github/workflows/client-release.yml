@@ -60,7 +60,7 @@ jobs:
           if($check.ExitCode -ne 0){throw 'Client self-test failed'}
           $result=Get-Content (Join-Path $checkFolder 'windows-self-test.json') | ConvertFrom-Json
           $version=Get-Content version.json | ConvertFrom-Json
-          if($result.version -ne $version.version -or -not $result.rendered){throw 'Packaged client version mismatch'}
+          if($result.version -ne $version.version -or -not $result.rendered -or -not $result.updaterProcessStarted){throw 'Packaged client/updater self-test failed'}
       - uses: actions/upload-artifact@v4
         with:
           name: client-windows

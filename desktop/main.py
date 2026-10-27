@@ -941,7 +941,13 @@ def main():
         app.processEvents()
         assert window.empty.isVisible() and window.device_list.count()==0
         assert window.grab().save(str(out/"windows-preview.png"))
-        (out/"windows-self-test.json").write_text(json.dumps({"version":updates.VERSION,"rendered":True,"hardwareTested":False}))
+        marker=out/'updater-process-started.txt';marker.unlink(missing_ok=True)
+        escaped=str(marker.resolve()).replace("'","''")
+        updates._launch_updater("[System.IO.File]::WriteAllText('"+escaped+"','started')")
+        deadline=time.monotonic()+20
+        while time.monotonic()<deadline and not marker.is_file():app.processEvents();time.sleep(.05)
+        assert marker.is_file() and marker.read_text()=='started','Packaged updater could not start; inspect update-launch.log'
+        (out/"windows-self-test.json").write_text(json.dumps({"version":updates.VERSION,"rendered":True,"updaterProcessStarted":True,"hardwareTested":False}))
         window.close()
         return 0
     return app.exec()
