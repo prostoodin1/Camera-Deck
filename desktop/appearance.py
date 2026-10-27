@@ -1,5 +1,5 @@
 """Camera Deck's minimal glass theme and viewfinder."""
-from PyQt6.QtCore import QPointF, Qt,QRectF,QSize,QPoint
+from PyQt6.QtCore import QPointF, Qt,QRectF,QSize,QPoint,QTimer
 from PyQt6.QtGui import QColor,QPainter,QPen,QFont
 from PyQt6.QtWidgets import QLabel,QSizePolicy,QDialog,QCheckBox,QGraphicsBlurEffect,QWidget,QVBoxLayout,QSlider,QPushButton
 import math
@@ -55,19 +55,19 @@ THEME="""
 QMainWindow,QDialog,QWidget#root,QWidget#cameraGrid {background:#080808;color:#f4f4f4}
 QWidget {font-family:'Segoe UI';font-size:13px;color:#dddddd}
 QLabel {background:transparent}
-QPushButton {background:#191919;border:1px solid #3c3c3c;border-radius:12px;padding:9px 15px;min-height:16px}
+QPushButton {background:#191919;border:1px solid #3c3c3c;border-radius:4px;padding:9px 15px;min-height:16px}
 QPushButton:hover {background:#2b2b2b;border-color:#ffe39b;color:#ffe39b}
 QPushButton:pressed {background:#ffd76b;color:#080808}
 QPushButton:disabled {color:#585858;background:#101010;border-color:#242424}
 QPushButton#primary {background:#ffd76b;color:#101010;border-color:#ffd76b;font-weight:600}
 QPushButton#primary:disabled {background:#101010;color:#585858;border-color:#242424}
-QPushButton#readout {border-radius:14px;color:#ffd76b;background:#151515;font-family:'Consolas';font-size:13px;border:1px solid #3c3c3c;padding:7px 8px}
+QPushButton#readout {border-radius:4px;color:#ffd76b;background:#151515;font-family:'Consolas';font-size:13px;border:1px solid #3c3c3c;padding:7px 8px}
 QPushButton#readout:hover {border-color:#ffd76b;background:#292929}
-QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#151515;color:#ffd76b;border:1px solid #3c3c3c;border-radius:9px;padding:5px 8px;min-height:17px;selection-background-color:#ffd76b;selection-color:#000000}
+QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox {background:#151515;color:#ffd76b;border:1px solid #3c3c3c;border-radius:4px;padding:5px 8px;min-height:17px;selection-background-color:#ffd76b;selection-color:#000000}
 QLineEdit#cameraName {color:#f2f2f2;border:0;background:transparent;font-weight:600}
-QComboBox QAbstractItemView {padding:8px;border:1px solid #424242;border-radius:12px;background:#151515;color:#eeeeee;selection-background-color:#ffd76b;selection-color:#080808}
+QComboBox QAbstractItemView {padding:8px;border:1px solid #424242;border-radius:4px;background:#151515;color:#eeeeee;selection-background-color:#ffd76b;selection-color:#080808}
 QComboBox::drop-down {border:0;width:20px}
-QWidget#tile {background:#111111;border:1px solid #343434;border-radius:12px}
+QWidget#tile {background:#111111;border:1px solid #343434;border-radius:4px}
 QScrollArea {border:0;background:#080808}
 QScrollBar:vertical {background:#151515;width:8px} QScrollBar::handle:vertical {border-radius:4px;background:#505050;min-height:30px}
 QCheckBox {spacing:6px;padding:2px;color:#ababab}
@@ -122,6 +122,8 @@ class Viewfinder(QLabel):
     def __init__(self):
         super().__init__()
         self.frame_rotation=0;self.on_focus=None;self.image_target=None
+        from face_motion import FaceMotion
+        self.face_motion=FaceMotion();self.face_timer=QTimer(self);self.face_timer.setInterval(16);self.face_timer.timeout.connect(self.animate_faces)
         self.tool='none';self.grid_lines=False;self.safe_area=False;self.analysis=None
         from monitor_tools import MonitorAnalyzer
         self.analyzer=MonitorAnalyzer(self);self.analyzer.ready.connect(self.analysis_ready)
@@ -159,8 +161,22 @@ class Viewfinder(QLabel):
         self.backdrop=image.scaled(24,14,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation) if self.soft_background else None
         self.update()
 
+    def animate_faces(self):
+        if not self.face_motion.sample() or not self.isVisible():self.face_timer.stop()
+        self.update()
+
+    def hideEvent(self,event):self.face_timer.stop();super().hideEvent(event)
+    def showEvent(self,event):
+        super().showEvent(event)
+        if self.face_motion.tracks:self.face_timer.start()
     def set_status(self,status):
-        self.telemetry=status;self.update()
+        self.telemetry=status
+        if status.get('tracking') is False:self.face_motion.clear()
+        else:
+            self.face_motion.expiry=.85 if 'trackingStamp' in status else 1.5
+            self.face_motion.observe(status.get('faces',[]),status.get('trackingStamp'))
+        if self.face_motion.tracks and self.isVisible():self.face_timer.start()
+        self.update()
 
     def paintEvent(self,event):
         painter=QPainter(self);painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -196,14 +212,26 @@ class Viewfinder(QLabel):
                 elif self.frame_rotation==180:x,y=1-x,1-y
                 elif self.frame_rotation==270:x,y=y,1-x
                 return QPointF(target.left()+max(0,min(1,x))*target.width(),target.top()+max(0,min(1,y))*target.height())
-            painter.setPen(QPen(QColor("#84e6a4" if s.get('afState') in (2,4) else "#ffd76b"),1.5))
-            try:
-                for face in s.get('faces',[])[:20]:
-                    a=position(face['left'],face['top']);b=position(face['right'],face['bottom']);painter.drawRoundedRect(QRectF(a,b).normalized(),5,5)
-                    for eye in face.get('eyes',[])[:2]:painter.drawEllipse(position(*eye),4,4)
-                if s.get('focusPoint'):
-                    p=position(*s['focusPoint']);painter.drawRect(QRectF(p.x()-10,p.y()-10,20,20))
-            except (KeyError,ValueError,TypeError):pass
+            painter.save();painter.setClipRect(target)
+            for face in self.face_motion.sample():
+                selected=s.get('faceFocus',True) and s.get('focus',-1)<0 and face['id']==s.get('activeFaceId',-1)
+                painter.setOpacity(face['alpha']*(1 if selected else .62))
+                color='#84e6a4' if selected and s.get('afState') in (2,4) else '#ffd24a' if selected else '#b2b4b8'
+                painter.setPen(QPen(QColor(color),1.8 if selected else 1.1))
+                l,t,r,b=face['box'];rect=QRectF(position(l,t),position(r,b)).normalized()
+                if s.get('trackingShape')=='oval':painter.drawEllipse(rect)
+                else:
+                    length=min(18,rect.width()*.22,rect.height()*.22)
+                    for x,sx in ((rect.left(),1),(rect.right(),-1)):
+                        for y,sy in ((rect.top(),1),(rect.bottom(),-1)):
+                            painter.drawLine(QPointF(x,y),QPointF(x+sx*length,y));painter.drawLine(QPointF(x,y),QPointF(x,y+sy*length))
+                for eye in face['eyes']:painter.drawEllipse(position(*eye),6 if selected else 4,6 if selected else 4)
+            painter.setOpacity(1)
+            if s.get('focusPoint') and not s.get('faceFocus',True):
+                try:
+                    p=position(*s['focusPoint']);painter.setPen(QPen(QColor('#84e6a4' if s.get('afState') in (2,4) else '#ffd24a'),1.5));painter.drawRoundedRect(QRectF(p.x()-10,p.y()-10,20,20),3,3)
+                except (ValueError,TypeError):pass
+            painter.restore()
         else:
             painter.setPen(QColor("#767676"));painter.setFont(QFont("Segoe UI",10))
             painter.drawText(self.rect().adjusted(24,30,-24,-30),Qt.AlignmentFlag.AlignCenter|Qt.TextFlag.TextWordWrap,self.message)

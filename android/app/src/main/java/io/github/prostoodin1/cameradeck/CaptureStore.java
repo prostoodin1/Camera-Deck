@@ -19,7 +19,7 @@ final class CaptureStore {
     Uri tree(){String value=selection();return value.isEmpty()?null:Uri.parse(value);}
     Uri root(){Uri t=tree();return t==null?null:DocumentsContract.buildDocumentUriUsingTree(t,DocumentsContract.getTreeDocumentId(t));}
     String label(){
-        if(tree()==null)return "Память телефона";
+        if(tree()==null)return GalleryPublisher.enabled(context)?"Галерея · DCIM/Camera Deck":"Память приложения";
         try(Cursor c=context.getContentResolver().query(root(),new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)){
             if(c!=null&&c.moveToFirst())return c.getString(0);
         }catch(Exception ignored){}
@@ -55,14 +55,14 @@ final class CaptureStore {
         FileDescriptor fd(){return descriptor.getFileDescriptor();}
         void finish()throws Exception{
             close();
-            if(file!=null){if(!file.renameTo(new File(internal,name)))throw new IOException("Не удалось завершить MP4");}
+            if(file!=null){File complete=new File(internal,name);if(!file.renameTo(complete))throw new IOException("Не удалось завершить MP4");GalleryPublisher.enqueue(context,complete);}
             else if(DocumentsContract.renameDocument(context.getContentResolver(),document,name)==null)throw new IOException("Накопитель не подтвердил завершение MP4; сохранён partial");
         }
         public void close()throws IOException{if(descriptor!=null){descriptor.close();descriptor=null;}}
     }
     Target video(String name)throws Exception{return new Target(name);}
     void photo(File file)throws Exception{
-        if(tree()==null)return;
+        if(tree()==null){GalleryPublisher.enqueue(context,file);return;}
         Uri doc=DocumentsContract.createDocument(context.getContentResolver(),root(),"application/octet-stream",file.getName()+".partial");
         if(doc==null)throw new IOException("Папка сохранения недоступна; фото осталось в памяти телефона");
         try(InputStream in=new FileInputStream(file);OutputStream out=context.getContentResolver().openOutputStream(doc,"w")){

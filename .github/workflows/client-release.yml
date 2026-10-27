@@ -1,0 +1,100 @@
+name: Publish permanent client patch
+on:
+  push:
+    tags: ['camera-deck-client-v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: client-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install cryptography
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: 'false'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - run: python scripts/build_client_android.py
+        env:
+          CAMERA_DECK_CLIENT_APK_KEYSTORE_B64: ${{ secrets.CAMERA_DECK_CLIENT_APK_KEYSTORE_B64 }}
+          CAMERA_DECK_CLIENT_APK_PASSWORD: ${{ secrets.CAMERA_DECK_CLIENT_APK_PASSWORD }}
+          CAMERA_DECK_CLIENT_APK_ALIAS: ${{ secrets.CAMERA_DECK_CLIENT_APK_ALIAS }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+      - run: python -m pip install -r desktop/requirements.txt pytest pyinstaller
+      - run: python -m pytest tests -q
+      - run: python scripts/collect_licenses.py
+      - run: python scripts/build_windows.py --client-only
+      - name: Verify packaged client
+        shell: pwsh
+        run: |
+          $checkFolder=Join-Path $env:RUNNER_TEMP 'client-self-test'
+          $check=Start-Process -FilePath (Join-Path $pwd 'desktop/dist/CameraDeck.exe') -ArgumentList @('--self-test',$checkFolder) -WindowStyle Hidden -Wait -PassThru
+          if($check.ExitCode -ne 0){throw 'Client self-test failed'}
+          $result=Get-Content (Join-Path $checkFolder 'windows-self-test.json') | ConvertFrom-Json
+          $version=Get-Content version.json | ConvertFrom-Json
+          if($result.version -ne $version.version -or -not $result.rendered){throw 'Packaged client version mismatch'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-windows
+          path: desktop/dist/CameraDeck.exe
+  publish:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install cryptography
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: 'false'
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-apk
+          path: release-input/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-windows
+          path: release-input/windows
+      - name: Assemble and publish signed patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMERA_DECK_CLIENT_UPDATE_PRIVATE_PEM: ${{ secrets.CAMERA_DECK_CLIENT_UPDATE_PRIVATE_PEM }}
+        run: |
+          mkdir -p release/client
+          cp release-input/android/app-release.apk release/client/CameraDeck-Android.apk
+          cp release-input/windows/CameraDeck.exe release/client/CameraDeck-Setup.exe
+          cp CLIENT_RELEASE_NOTES.md release/client/RELEASE-NOTES.md
+          python scripts/publish_client.py release/client

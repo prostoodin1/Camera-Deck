@@ -71,7 +71,7 @@ class CameraTile(QWidget):
         heading.addWidget(self.name, 2); heading.addWidget(self.group, 1); heading.addWidget(remove)
         box.addLayout(heading)
         self.video = Viewfinder()
-        self.video.on_focus=lambda x,y:self.command("framing",focusX=x,focusY=y)
+        self.video.on_focus=self.focus_at
         box.addWidget(self.video,1)
         readings=QHBoxLayout();readings.setSpacing(4)
         self.iso_readout=DropdownButton("ISO —");self.shutter_readout=DropdownButton("S —")
@@ -132,6 +132,16 @@ class CameraTile(QWidget):
         rail=QHBoxLayout();select=QPushButton("Управление");select.clicked.connect(lambda:(self.window.studio.select(self),self.window.studio.navigate(1)));rail.addWidget(select)
         self.quick_record=QPushButton("● Запись");self.quick_record.setObjectName('recordAction');self.quick_record.clicked.connect(lambda:(self.photo if self.status.get("mode")=="photo" else self.record).click());rail.addWidget(self.quick_record);box.addLayout(rail)
 
+    def focus_at(self,x,y):
+        for face in getattr(self.client,'live_tracking',{}).get('faces',self.status.get('faces',[])):
+            if 'id' in face and face.get('left',2)<=x<=face.get('right',-1) and face.get('top',2)<=y<=face.get('bottom',-1):
+                self.command('framing',faceId=face['id']);return
+        self.command('framing',focusX=x,focusY=y)
+
+    def image_settings(self):
+        import image_controls
+        image_controls.show(self)
+
     def audio_settings(self):
         from PyQt6.QtMultimedia import QMediaDevices
         dialog=GlassSheet(self.window);dialog.setWindowTitle('Звуковой тракт');dialog.setMinimumWidth(490)
@@ -175,11 +185,22 @@ class CameraTile(QWidget):
         preset=QComboBox()
         for name,key in [('Общий план','wide'),('Средний план','medium'),('Портрет','portrait'),('Крупный план','close')]:preset.addItem(name,key)
         preset.setCurrentIndex(max(0,preset.findData(s.get('framing','portrait'))));form.addRow("План",preset)
+        target=QComboBox()
+        for title,key in [('Лицо','face'),('Левый глаз','leftEye'),('Правый глаз','rightEye')]:target.addItem(title,key)
+        target.setCurrentIndex(max(0,target.findData(s.get('focusTarget','face'))));form.addRow('Цель фокуса',target)
+        shape=QComboBox();shape.addItem('Уголки','corners');shape.addItem('Овал','oval');shape.setCurrentIndex(max(0,shape.findData(s.get('trackingShape','corners'))));form.addRow('Метка лица',shape)
+        limit=SliderField(1,30,s.get('faceLimit',12),0);form.addRow('Максимум лиц',limit)
+        person=QComboBox();person.addItem('Автоматический выбор',-1)
+        for item in s.get('faces',[]):
+            if item.get('id',-1)>=0:person.addItem('Лицо #'+str(item['id']),item['id'])
+        selected=s.get('selectedFaceId',-1)
+        if selected>=0 and person.findData(selected)<0:person.addItem('Лицо #'+str(selected)+' · вне кадра',selected)
+        person.setCurrentIndex(max(0,person.findData(selected)));form.addRow('Человек · можно нажать на лицо',person)
         quality=QComboBox();quality.addItem("Плавность · до 720p60",'balanced');quality.addItem("Детали · до 1080p60",'detail');quality.setCurrentIndex(max(0,quality.findData(s.get('streamProfile','balanced'))));quality.setEnabled(not s.get('recording'));form.addRow("Передача на ноутбук",quality)
         note=QLabel("Запись на телефоне сохраняет выбранное исходное качество.\nРеальные FPS просмотра зависят от камеры и Wi-Fi.\nАвтозум сохраняет масштаб, если лицо пропало.");note.setWordWrap(True);form.addRow(note)
         buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel);buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
-        values=dict(zoom=zoom.value(),autoZoom=automatic.isChecked(),tracking=tracking.isChecked(),faceFocus=face.isChecked(),preset=preset.currentData())
+        values=dict(zoom=zoom.value(),autoZoom=automatic.isChecked(),tracking=tracking.isChecked(),faceFocus=face.isChecked(),preset=preset.currentData(),focusTarget=target.currentData(),trackingShape=shape.currentData(),faceId=person.currentData(),faceLimit=int(limit.value()))
         profile=quality.currentData()
         def work():
             self.client.command('framing',**values)
@@ -252,11 +273,11 @@ class CameraTile(QWidget):
         if rotation:image=image.transformed(QTransform().rotate(rotation),Qt.TransformationMode.SmoothTransformation)
         self.video.frame_rotation=rotation
         tracking=getattr(self.client,'live_tracking',{})
-        if tracking:self.video.set_status(dict(self.status,**tracking))
+        self.video.set_status(dict(self.status,**tracking))
         self.video.set_frame(image)
         if self.fullscreen is not None:
             self.full_view.frame_rotation=rotation
-            if tracking:self.full_view.set_status(dict(self.status,**tracking))
+            self.full_view.set_status(dict(self.status,**tracking))
         if self.fullscreen is not None:self.full_view.set_frame(image)
 
     def receive_frames(self):
@@ -366,10 +387,10 @@ class CameraTile(QWidget):
         title=QLabel({"iso":"Чувствительность ISO","shutter":"Выдержка","focus":"Фокус"}[kind]);title.setStyleSheet("font-size:19px;font-weight:600");layout.addWidget(title)
         auto=Toggle("Автоматически");auto.setChecked(s.get("focus",-1)<0 if kind=="focus" else not s.get("manualIso"));layout.addWidget(auto)
         supported=bool(s.get("focusMax")) if kind=="focus" else s.get("manualSensor",False)
-        if kind=="iso":field=SliderField(s.get("isoMin",50),s.get("isoMax",6400),s.get("manualIso") or s.get("iso",100))
+        if kind=="iso":field=SliderField(s.get("isoMin",50),s.get("isoMax",6400),s.get("manualIso") or s.get("iso",100),0,True)
         elif kind=="shutter":
             maximum=s.get("exposureMaxNs",100000000)/1e6
-            if s.get("recording"):maximum=min(maximum,1000/max(1,s.get("videoFps",30)))
+            if s.get("mode")=="video":maximum=min(maximum,1000/max(1,s.get("videoFps",30)))
             field=SliderField(max(.0001,s.get("exposureMinNs",1000)/1e6),maximum,(s.get("manualExposureNs") or s.get("exposureNs",10000000))/1e6,3,True)
             layout.addWidget(QLabel("Миллисекунды"))
         else:field=SliderField(0,s.get("focusMax") or 0,max(0,s.get("focus",-1)),2)
@@ -464,7 +485,7 @@ class CameraTile(QWidget):
         auto.setChecked(not status.get("manualIso"))
         auto.setEnabled(status.get("manualSensor", False))
         form.addRow(auto)
-        iso=SliderField(status.get("isoMin",50),status.get("isoMax",6400),status.get("manualIso") or status.get("iso",100))
+        iso=SliderField(status.get("isoMin",50),status.get("isoMax",6400),status.get("manualIso") or status.get("iso",100),0,True)
         minimum=max(.0001,status.get("exposureMinNs",1000)/1e6)
         maximum=min(1000/max(1,status.get("videoFps",30)) if status.get("recording") else status.get("exposureMaxNs",100000000)/1e6,status.get("exposureMaxNs",100000000)/1e6)
         exposure=SliderField(minimum,maximum,(status.get("manualExposureNs") or status.get("exposureNs",16666666))/1e6,4,True)
@@ -532,11 +553,13 @@ class Window(QMainWindow):
         self.tiles, self.jobs, self.devices = [], [], []
         self.available = None
         self.checking = False
+        self.update_launching=False;self.last_input=time.monotonic()
         self.scanning=False
         self.reconnecting=set()
         from usb_transport import UsbConnections
         self.usb=UsbConnections()
         self.usb_scanning=False
+        self.usb_profiles=self.load_preferences().get('usbProfiles',[])
         self.usb_timer=QTimer(self);self.usb_timer.setInterval(3000);self.usb_timer.timeout.connect(self.check_usb_connection)
         if auto_checks:self.usb_timer.start()
         self.setStyleSheet(THEME)
@@ -548,9 +571,12 @@ class Window(QMainWindow):
         for i,title in enumerate(("Монитор","Камера","Продакшн","Материалы")):view_menu.addAction(title,lambda checked=False,n=i:self.studio.navigate(n))
         system_menu=menu.addMenu("Система");system_menu.addAction("Проверить обновления",lambda:self.check_update(True))
         self.refresh_devices()
-        self.timer=QTimer(self);self.timer.timeout.connect(lambda:self.check_update() if self.auto.isChecked() else None);self.timer.start(3600000)
+        self.timer=QTimer(self);self.timer.timeout.connect(lambda:self.check_update() if self.auto.isChecked() else None);self.timer.start(900000)
         self.discovery_timer=QTimer(self);self.discovery_timer.timeout.connect(lambda:self.scan_devices() if self.sidebar.isVisible() else None)
         if auto_checks:self.discovery_timer.start(8000);QTimer.singleShot(300,self.scan_devices);QTimer.singleShot(1200,lambda:self.check_update() if self.auto.isChecked() else None)
+        self.patch_timer=QTimer(self);self.patch_timer.setInterval(5000);self.patch_timer.timeout.connect(self.maybe_auto_update)
+        if auto_checks:self.patch_timer.start()
+        QApplication.instance().installEventFilter(self)
         preferences=self.load_preferences()
         if preferences.get('geometry'):
             from PyQt6.QtCore import QByteArray
@@ -561,15 +587,16 @@ class Window(QMainWindow):
         try:
             data=json.loads((updates.DATA/"preferences.json").read_text())
             if not isinstance(data,dict):return {}
-            types={'autoUpdates':bool,'geometry':str,'columns':int,'selectedCamera':str,'cameraGroups':dict}
+            types={'autoUpdates':bool,'geometry':str,'columns':int,'selectedCamera':str,'cameraGroups':dict,'usbProfiles':list}
             result={k:v for k,v in data.items() if k in types and type(v) is types[k]}
             if 'cameraGroups' in result:result['cameraGroups']={k:v for k,v in result['cameraGroups'].items() if isinstance(k,str) and isinstance(v,str)}
+            if 'usbProfiles' in result:result['usbProfiles']=[p for p in result['usbProfiles'][:10] if isinstance(p,dict) and all(isinstance(p.get(k),str) for k in ('serial','fingerprint','name')) and len(p['fingerprint'])==64]
             return result
         except (OSError,ValueError): return {}
 
     def save_preferences(self):
         updates.DATA.mkdir(parents=True,exist_ok=True)
-        (updates.DATA/"preferences.json").write_text(json.dumps({"autoUpdates":self.auto.isChecked(),"geometry":bytes(self.saveGeometry().toBase64()).decode(),"columns":self.columns.currentIndex(),"selectedCamera":self.studio.saved_selection,"cameraGroups":{**self.load_preferences().get("cameraGroups",{}),**{t.rotation_identity:t.group.text() for t in self.tiles}}}))
+        (updates.DATA/"preferences.json").write_text(json.dumps({"usbProfiles":self.usb_profiles,"autoUpdates":self.auto.isChecked(),"geometry":bytes(self.saveGeometry().toBase64()).decode(),"columns":self.columns.currentIndex(),"selectedCamera":self.studio.saved_selection,"cameraGroups":{**self.load_preferences().get("cameraGroups",{}),**{t.rotation_identity:t.group.text() for t in self.tiles}}}))
 
     def run(self, function, callback=lambda _: None, failure=None):
         signal = Result(); self.jobs.append(signal)
@@ -644,7 +671,7 @@ class Window(QMainWindow):
         except Exception as e:self.hint.setText("Доверенные телефоны: "+str(e));return
         for device in devices:
             identity=device['id'];entry=trusted.match(device,saved)
-            if not entry or identity in self.reconnecting or any(getattr(t.client,'identity','')==identity or t.client.host==device['host'] for t in self.tiles):continue
+            if not entry or identity in self.reconnecting or "fp:"+entry["fingerprint"] in self.reconnecting or any(getattr(t.client,'identity','')==identity or t.client.host==device['host'] for t in self.tiles):continue
             self.reconnecting.add(identity);client=CameraClient(device['host'],entry['fingerprint'])
             def done(result,client=client,identity=identity):
                 self.reconnecting.discard(identity);client.identity=identity
@@ -661,6 +688,11 @@ class Window(QMainWindow):
         ip, ok = QInputDialog.getText(self,"Подключение по IP","IPv4-адрес из Android-приложения:")
         if ok and ip.strip(): self.begin_connect(ip.strip(),ip.strip())
 
+    def remember_usb(self,client,name):
+        if getattr(client,'transport','lan')!='usb' or not getattr(client,'usb_serial',''):return
+        self.usb_profiles=[p for p in self.usb_profiles if p['serial']!=client.usb_serial]+[dict(serial=client.usb_serial,fingerprint=client.fingerprint,name=name)]
+        self.usb_profiles=self.usb_profiles[-10:];self.save_preferences()
+
     def restore_usb(self,devices):
         restored=set()
         for device in devices:
@@ -672,9 +704,27 @@ class Window(QMainWindow):
         return restored
 
     def check_usb_connection(self):
-        if self.usb_scanning or not any(getattr(t.client,'transport','lan')=='usb' and t.failures for t in self.tiles):return
+        if self.usb_scanning:return
+        wanted=any(not any(getattr(t.client,'usb_serial','')==p['serial'] and not t.failures for t in self.tiles) for p in self.usb_profiles)
+        if not wanted and not any(getattr(t.client,'transport','lan')=='usb' and t.failures for t in self.tiles):return
         self.usb_scanning=True
-        def done(devices):self.usb_scanning=False;self.restore_usb(devices)
+        def done(devices):
+            self.usb_scanning=False;self.restore_usb(devices)
+            try:saved=trusted.load()
+            except Exception:return
+            for device in devices:
+                profile=next((p for p in self.usb_profiles if p['serial']==device['serial']),None)
+                if not profile:continue
+                fp=profile['fingerprint'];marker='fp:'+fp
+                if marker in self.reconnecting or any(getattr(t.client,'fingerprint','')==fp for t in self.tiles):continue
+                entry=next((e for e in saved.values() if e.get('fingerprint')==fp),None)
+                if not entry:continue
+                client=CameraClient('127.0.0.1',fp,port=device['port'],transport='usb');client.usb_serial=device['serial'];self.reconnecting.add(marker)
+                def connected(result,client=client,marker=marker):
+                    self.reconnecting.discard(marker);client.identity=result.get('id','')
+                    if not any(getattr(t.client,'fingerprint','')==client.fingerprint for t in self.tiles):self.tiles.append(CameraTile(self,client,result.get('name','USB')));self.rebuild()
+                def failed(message,marker=marker):self.reconnecting.discard(marker)
+                self.run(lambda client=client,entry=entry:client.resume(entry['secret']),connected,failed)
         def failed(message):self.usb_scanning=False
         self.run(self.usb.discover,done,failed)
 
@@ -710,7 +760,7 @@ class Window(QMainWindow):
                 except Exception:entry=None
                 if entry:
                     def resumed(result):
-                        client.identity=result.get('id','');self.tiles.append(CameraTile(self,client,result.get('name',name)));self.rebuild()
+                        client.identity=result.get('id','');self.tiles.append(CameraTile(self,client,result.get('name',name)));self.remember_usb(client,result.get('name',name));self.rebuild()
                     self.run(lambda:client.resume(entry['secret']),resumed,lambda message:confirm(fp));return
             if announced and fp != announced:
                 self.message("Сертификат","Отпечаток из поиска отличается от сертификата. Повторите подключение по IP и сравните отпечаток на телефоне."); return
@@ -742,7 +792,7 @@ class Window(QMainWindow):
                 if result.get("rememberToken"):
                     try:trusted.remember(client.identity,host,client.fingerprint,result.get("name",name),result['rememberToken'])
                     except Exception as e:self.message("Запомнить телефон",str(e))
-                tile = CameraTile(self,client,result.get("name",name)); self.tiles.append(tile); self.rebuild()
+                tile = CameraTile(self,client,result.get("name",name)); self.tiles.append(tile);self.remember_usb(client,result.get("name",name)); self.rebuild()
             pin_value=pin.text();remember_value=remember.isChecked()
             self.run(lambda: client.pair(pin_value,remember_value),paired)
         self.run(client.probe,confirm)
@@ -752,7 +802,7 @@ class Window(QMainWindow):
             self.message('Запись на ПК','Сначала остановите запись и дождитесь готового файла. Затем камеру можно отключить от пульта.');return
         self.studio.pc_jobs.pop(id(tile),None);self.studio.results.pop(id(tile),None)
         if tile.fullscreen is not None:tile.fullscreen.close()
-        tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close(); self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
+        tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close();self.usb_profiles=[p for p in self.usb_profiles if p['serial']!=getattr(tile.client,'usb_serial','')]; self.tiles.remove(tile); self.grid.removeWidget(tile); tile.hide(); self.rebuild()
         # Keep QObject alive until its networking thread has observed the stop event.
         QTimer.singleShot(10000,tile.deleteLater)
 
@@ -787,11 +837,42 @@ class Window(QMainWindow):
             if manual: self.message("Обновления",message)
         self.run(updates.check_updates,done,failed)
 
+    def eventFilter(self,obj,event):
+        from PyQt6.QtCore import QEvent
+        if event.type() in (QEvent.Type.MouseButtonPress,QEvent.Type.KeyPress,QEvent.Type.Wheel):self.last_input=time.monotonic()
+        return super().eventFilter(obj,event)
+
+    def maybe_auto_update(self):
+        from client_install import auto_update_allowed,failed_code
+        result=self.available
+        if self.update_launching or not result:return
+        self.patch_phones(result)
+        if result.get("code",0)<=max(failed_code(),updates.VERSION_CODE):return
+        meta=result.get(updates.windows_platform(),{});candidate=updates.DATA/'updates'/str(result['code'])/meta.get('name','missing')
+        if not auto_update_allowed(self.is_recording(),self.auto.isChecked(),getattr(sys,'frozen',False),candidate.is_file(),time.monotonic()-self.last_input):return
+        try:updates.restart_with_update(candidate,result)
+        except Exception as failure:self.update_label.setText('Автообновление: '+str(failure));return
+        self.update_launching=True;self.close()
+
     def ready_update(self,result):
-        self.update_label.setText("Готово обновление " + result["version"]+" · установится при закрытии пульта")
+        self.update_label.setText("Патч " + result["version"]+" проверен · автоустановка при простое")
         self.install_button.setEnabled(True)
 
-    def is_recording(self): return any(j.get("state") in ("starting","recording","recovering") for j in self.studio.pc_jobs.values()) or any(not tile.status or tile.status.get("recording") or tile.failures for tile in self.tiles)
+    def is_recording(self): return self.studio.busy or any(j.get("state") in ("starting","recording","recovering") for j in self.studio.pc_jobs.values()) or any(not tile.status or tile.status.get("recording") or tile.status.get("photoPending") or tile.status.get("busy") or tile.failures for tile in self.tiles)
+
+    def patch_phones(self,result):
+        if not self.auto.isChecked() or self.is_recording():return
+        if not hasattr(self,'phone_patch_retry'):self.phone_patch_retry={}
+        for tile in self.tiles:
+            s=tile.status;identity=tile.client.fingerprint
+            if not s.get('clientChannel') or not s.get('autoUpdates',True) or max(s.get('versionCode',0),s.get('stagedUpdateCode',0))>=result['code']:continue
+            if time.monotonic()<self.phone_patch_retry.get(identity,0):continue
+            self.phone_patch_retry[identity]=time.monotonic()+120
+            def work(t=tile):
+                apk=updates.download_update(result,'android')
+                if t.stopped.is_set() or t.failures or t.status.get('recording') or t.status.get('photoPending'):return
+                t.client.send_update(apk,result['envelope'])
+            self.run(work,lambda _:None,lambda message:self.update_label.setText('Патч телефона: '+message+' · повтор позже'))
 
     def install_windows(self):
         if self.is_recording(): self.message("Обновление","Остановите запись и восстановите связь со всеми камерами перед перезапуском."); return
@@ -802,7 +883,7 @@ class Window(QMainWindow):
             if QMessageBox.question(self,"Обновить Windows", "Перезапустить Camera Deck и установить " + result["version"] + "?") != QMessageBox.StandardButton.Yes: return
             try: updates.restart_with_update(path,result)
             except Exception as exc: self.message("Обновление",str(exc)); return
-            self.close()
+            self.update_launching=True;self.close()
         self.run(lambda: updates.download_update(result,updates.windows_platform()),install)
 
     def update_phone(self,tile):
@@ -819,13 +900,14 @@ class Window(QMainWindow):
     def closeEvent(self,event:QCloseEvent):
         if self.is_recording() and QMessageBox.question(self,"Закрыть пульт", "Есть запись или потеряна связь. Камеры на телефонах продолжат работу. Копия, записываемая на ПК, будет прервана и может потребовать восстановления. Закрыть пульт?") != QMessageBox.StandardButton.Yes:
             event.ignore(); return
-        if self.auto.isChecked() and self.available and self.available['code']>updates.VERSION_CODE and not self.is_recording() and getattr(sys,'frozen',False):
+        from client_install import failed_code
+        if not self.update_launching and self.auto.isChecked() and self.available and self.available['code']>max(updates.VERSION_CODE,failed_code()) and not self.is_recording() and getattr(sys,'frozen',False):
             try:
                 meta=self.available[updates.windows_platform()];candidate=updates.DATA/'updates'/str(self.available['code'])/meta['name']
                 if candidate.is_file():updates.restart_with_update(candidate,self.available)
             except Exception as exc:self.message("Обновление",str(exc))
         self.save_preferences()
-        self.timer.stop();self.discovery_timer.stop();self.usb_timer.stop();self.studio.timer.stop();self.studio.media.epoch+=1
+        self.timer.stop();self.discovery_timer.stop();self.usb_timer.stop();self.patch_timer.stop();self.studio.timer.stop();self.studio.media.epoch+=1
         if hasattr(self,"studio"):self.studio.media.player.stop()
         for tile in self.tiles: tile.stopped.set();tile.monitor.stop();tile.video.analyzer.close()
         threading.Thread(target=self.usb.close,name='camera-usb-cleanup',daemon=False).start()
@@ -844,11 +926,17 @@ def main():
         os.environ["QT_QPA_PLATFORM"]="offscreen"
         out=Path(sys.argv[2]);out.mkdir(parents=True,exist_ok=True)
         updates.DATA=out/'self-test-data'
+    from client_install import ensure_installed,acknowledge_boot,single_instance,activate_on_message
+    if not self_test and ensure_installed():return 0
     app=QApplication(sys.argv)
+    server=single_instance(app) if not self_test and getattr(sys,"frozen",False) else False
+    if server is None:return 0
     font_file=Path(os.environ.get("WINDIR","C:/Windows"))/"Fonts"/"segoeui.ttf"
     if font_file.is_file(): QFontDatabase.addApplicationFont(str(font_file))
     app.setFont(QFont("Segoe UI",10))
     window=Window(auto_checks=not self_test); window.show()
+    if server:activate_on_message(server,window)
+    if not self_test:acknowledge_boot()
     if self_test:
         app.processEvents()
         assert window.empty.isVisible() and window.device_list.count()==0

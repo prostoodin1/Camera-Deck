@@ -62,6 +62,8 @@ class State:
         return {"ready":True,"recording":self.recording,"error":"ТЕСТОВЫЙ СТЕНД · Android не подключён","cameraId":"0","rotation":0,"frameTime":int(time.time()*1000),
             "frameSequence":int(time.time()*10),"iso":100 if self.index==0 else 200,"exposureNs":10000000,"manualIso":0,"manualExposureNs":0,"focus":-1,
             "audioInputs":[{"id":1,"name":"Микрофон телефона · симулятор"},{"id":2,"name":"USB-микрофон · симулятор"}],"audioInput":0,"audioRoutedName":"Микрофон телефона · симулятор","lastFile":self.last,"audio":True,"audioAvailable":False,"name":"Симулятор A" if self.index==0 else "Симулятор B","version":VERSION,"versionCode":self.versionCode,
+            "imageControls":{"ev":0,"evMin":-2,"evMax":2,"evStep":.333333,"aeLockAvailable":True,"whiteBalance":1,"whiteBalanceModes":[1,2,5,6],"antiBanding":3,"antiBandingModes":[0,1,2,3],"filter":0,"filters":[0,1,4],"meteringAvailable":True,"metering":0,"contrast":1,"gamma":1,"toneCurveAvailable":True,"apertures":[1.8],"aperture":0,"backgroundBlur":0},
+            "tracking":True,"trackingShape":"corners","focusTarget":"face","faceLimit":12,"selectedFaceId":-1,
             "mode":self.mode,"videoWidth":self.width,"videoHeight":self.height,"videoFps":self.fps,"photoWidth":4000,"photoHeight":3000,"photoFormat":self.photoFormat,
             "powerState":"record_preview" if self.recording else "preview","eco":False,"previewFps":24,"manualSensor":True,"isoMin":50,"isoMax":6400,"exposureMinNs":100000,"exposureMaxNs":1000000000,"focusMax":10,
             "cameras":[{"id":"0","facing":1},{"id":"1","facing":0}],"captureCapabilities":{"videoModes":[{"width":1280,"height":720,"fps":[30,60]},{"width":1920,"height":1080,"fps":[30,60]},{"width":3840,"height":2160,"fps":[30]}],
@@ -174,6 +176,16 @@ def main():
                 dialog.show();app.processEvents();assert dialog.grab().save(str(out/'07-audio-routing-simulator.png'));return QDialog.DialogCode.Rejected
             QDialog.exec=capture_audio
             try:tile.audio_settings()
+            finally:QDialog.exec=original
+            def capture_image(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'08-image-controls-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_image
+            try:tile.image_settings()
+            finally:QDialog.exec=original
+            def capture_faces(dialog):
+                dialog.show();app.processEvents();assert dialog.grab().save(str(out/'09-face-controls-simulator.png'));return QDialog.DialogCode.Rejected
+            QDialog.exec=capture_faces
+            try:tile.framing_settings()
             finally:QDialog.exec=original
             states[1].recording=False
             for tile in window.tiles:tile.status["recording"]=False;tile.stopped.set();tile.monitor.stop()

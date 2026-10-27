@@ -1,1 +1,3 @@
 third_party_licenses/** -whitespace
+desktop/client-update-public.pem text eol=lf
+android/app/src/main/assets/client-update-public.pem text eol=lf

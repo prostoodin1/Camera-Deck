@@ -16,13 +16,13 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.10.0"
-VERSION_CODE = 15
-RELEASE_NAME = "Slate"
-PRODUCT = "camera-deck-aurora"
+VERSION = "0.11.1"
+VERSION_CODE = 17
+RELEASE_NAME = "Client"
+PRODUCT = "camera-deck-client"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
 ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-DATA = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CameraDeck"
+DATA = Path(os.environ.get("CAMERA_DECK_DATA", str(Path(os.environ.get("LOCALAPPDATA", Path.home())) / "CameraDeck")))
 _download_commit=threading.Lock()
 
 
@@ -94,7 +94,7 @@ def verify_envelope(envelope: bytes, public_key: bytes | None = None, current_co
     signed = json.loads(envelope)
     payload = base64.b64decode(signed["payload"], validate=True)
     signature = base64.b64decode(signed["signature"], validate=True)
-    key = serialization.load_pem_public_key(public_key or (ROOT / "aurora-update-public.pem").read_bytes())
+    key = serialization.load_pem_public_key(public_key or (ROOT / "client-update-public.pem").read_bytes())
     key.verify(signature, payload, padding.PKCS1v15(), hashes.SHA256())
     data = json.loads(payload)
     if data.get("product") != PRODUCT or data.get("protocol") != 1 or type(data.get("code")) is not int or data["code"] <= current_code:
@@ -121,7 +121,7 @@ def check_updates() -> dict | None:
         raise ValueError("Too many releases")
     candidates = []
     for release in json.loads(raw):
-        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-"):
+        if release.get("draft") or not release.get("tag_name", "").startswith("camera-deck-client-v"):
             continue
         assets = {asset["name"]: asset for asset in release.get("assets", [])}
         manifest = assets.get("camera-deck-update.json")
@@ -261,7 +261,29 @@ for ($attempt = 0; $attempt -lt 30; $attempt++) {{
     }} catch {{ Start-Sleep -Seconds 1 }}
 }}
 if (-not $replaced) {{ throw 'Executable is still locked; previous version retained' }}
-Start-Process -FilePath $target -WindowStyle Hidden
+$ack = Join-Path (Split-Path -Parent $target) 'boot-ack.json'
+$state = Join-Path (Split-Path -Parent $target) 'update-state.json'
+Remove-Item -LiteralPath $ack -ErrorAction SilentlyContinue
+$startedAt = Get-Date
+$next = Start-Process -FilePath $target -WindowStyle Hidden -PassThru
+$healthy = $false
+for ($check = 0; $check -lt 45; $check++) {{
+    Start-Sleep -Seconds 1
+    if (Test-Path -LiteralPath $ack) {{
+        try {{ $boot = Get-Content -LiteralPath $ack -Raw | ConvertFrom-Json; if ($boot.code -eq {manifest['code']}) {{ $healthy=$true; break }} }} catch {{}}
+    }}
+    if ($next.HasExited) {{ break }}
+}}
+if (-not $healthy) {{
+    Get-CimInstance Win32_Process -Filter "Name='CameraDeck.exe'" | Where-Object {{ $_.ExecutablePath -eq $target -and $_.CreationDate -ge $startedAt }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
+    for ($retry=0; $retry -lt 10; $retry++) {{
+        try {{ Copy-Item -LiteralPath ($target + '.previous') -Destination $target -Force -ErrorAction Stop; break }} catch {{ Start-Sleep -Seconds 1 }}
+    }}
+    @{{ failedCode={manifest['code']}; rolledBack=$true }} | ConvertTo-Json | Set-Content -LiteralPath $state -Encoding UTF8
+    Start-Process -FilePath $target -WindowStyle Hidden
+}} else {{
+    @{{ installedCode={manifest['code']}; rolledBack=$false }} | ConvertTo-Json | Set-Content -LiteralPath $state -Encoding UTF8
+}}
 """
     _launch_updater(script)
 

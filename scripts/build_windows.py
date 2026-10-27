@@ -17,7 +17,7 @@ def main():
             raise SystemExit(f"Missing Python runtime dependency: {dll.name}")
     common = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--noupx",
               "--windowed", "--add-data", "update-public.pem;.",
-              "--add-data", "aurora-update-public.pem;.", "--collect-all", "av",
+              "--add-data", "aurora-update-public.pem;.", "--add-data", "client-update-public.pem;.", "--collect-all", "av",
               "--add-data", "../third_party_licenses;third_party_licenses",
               "--add-data", "../THIRD_PARTY_NOTICES.md;."]
     for dll in required:
@@ -33,6 +33,7 @@ def main():
     if not notice.is_file():raise SystemExit('Missing Android Platform Tools NOTICE.txt')
     common += ['--add-data',f'{notice};platform-tools']
     subprocess.run(common + ["--onefile", "--name", "CameraDeck", "main.py"], cwd=ROOT / "desktop", check=True)
+    if "--client-only" in sys.argv:return
     subprocess.run(common + ["--onedir", "--name", "CameraDeck-Portable", "main.py"], cwd=ROOT / "desktop", check=True)
     folder = ROOT / "desktop/dist/CameraDeck-Portable"
     for name in ("python313.dll", "vcruntime140.dll", "vcruntime140_1.dll"):

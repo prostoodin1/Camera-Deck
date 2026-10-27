@@ -75,6 +75,7 @@ class Studio(QWidget):
         self.group=QLineEdit();self.group.setPlaceholderText('Группа камеры');self.group.editingFinished.connect(self.change_group);form.addWidget(self.group)
         self.view=Toggle('Предпросмотр');self.view.toggled.connect(lambda value:self.selected and self.selected.view_toggle.setChecked(value));form.addWidget(self.view)
         self.audio=Toggle('Слушать микрофон');self.audio.toggled.connect(lambda value:self.selected and self.selected.listen.setChecked(value));form.addWidget(self.audio)
+        image=QPushButton('Яркость / цвет / фон');image.clicked.connect(lambda:self.invoke('image_settings'));form.addWidget(image)
         audio_route=QPushButton('Источник / выход звука');audio_route.clicked.connect(lambda:self.selected and self.selected.audio_settings());form.addWidget(audio_route)
         rotate=QPushButton('Повернуть 90°');rotate.clicked.connect(lambda:self.selected and self.selected.rotate_picture());form.addWidget(rotate)
         self.lock=Toggle('Блокировка поворота');self.lock.toggled.connect(lambda value:self.selected and self.selected.lock_rotation(value));form.addWidget(self.lock)

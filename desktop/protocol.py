@@ -1,6 +1,7 @@
 """Local protocol. TLS identity is checked BEFORE sending the PIN or token."""
 from __future__ import annotations
 import hashlib
+import base64
 import http.client
 import ipaddress
 import json
@@ -122,14 +123,20 @@ class CameraClient:
                 if line.strip()!=b"--aurora":raise ValueError("Повреждена граница видеопотока")
                 headers={};total=0
                 while True:
-                    line=response.readline(4096);total+=len(line)
-                    if not line or total>16384:raise ValueError("Повреждены заголовки видеопотока")
+                    line=response.readline(32769);total+=len(line)
+                    if not line or len(line)>32768 or total>65536:raise ValueError("Повреждены заголовки видеопотока")
                     if line==b"\r\n":break
                     key,value=line.decode("ascii").split(":",1);headers[key.lower()]=value.strip()
                 size=int(headers.get("content-length","0"))
                 if not 0<size<=2_000_000:raise ValueError("Недопустимый размер видеокадра")
                 frame=response.read(size)
                 if len(frame)!=size:raise ConnectionError("Видеокадр получен не полностью")
+                metadata={}
+                if headers.get("x-tracking"):
+                    if len(headers["x-tracking"])>24000:raise ValueError("Слишком много метаданных лиц")
+                    metadata=json.loads(base64.b64decode(headers["x-tracking"],validate=True))
+                    if not isinstance(metadata,dict) or not isinstance(metadata.get("faces",[]),list) or len(metadata.get("faces",[]))>30:raise ValueError("Некорректные метаданные лиц")
+                self.live_tracking=metadata
                 yield frame,int(headers.get("x-rotation","0"))%360
         finally:conn.close()
 
