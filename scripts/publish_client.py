@@ -36,6 +36,8 @@ def main():
     folder=Path(sys.argv[1]).resolve();version=json.loads((ROOT/'version.json').read_text());tag='camera-deck-client-v'+version['version']
     if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,text=True).strip():raise RuntimeError('Commit validated sources before release')
     if os.environ.get('GITHUB_REF_TYPE')=='tag' and os.environ.get('GITHUB_REF_NAME')!=tag:raise RuntimeError('Tag/version mismatch')
+    from release_scan import validate_scan
+    validate_scan(folder,subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip())
     data=manifest(folder);subprocess.run(['git','archive','--format=zip','--output',str(folder/'CameraDeck-Source.zip'),'HEAD'],cwd=ROOT,check=True)
     (folder/'SHA256SUMS.txt').write_text(''.join(digest(p)+'  '+p.name+'\n' for p in sorted(folder.iterdir()) if p.is_file() and p.name!='SHA256SUMS.txt'))
     token=os.environ.get('GH_TOKEN') or updates.github_token();base=updates.API
@@ -61,6 +63,9 @@ def main():
                 req=urllib.request.Request(upload+'?name='+quote(path.name),data=stream,method='POST',headers={'Authorization':'Bearer '+token,'Content-Length':str(path.stat().st_size),'Content-Type':'application/octet-stream','User-Agent':'CameraDeck-Client-Release'})
                 with urllib.request.urlopen(req,timeout=180) as response:asset=json.load(response)
         if asset.get('digest')!='sha256:'+digest(path) or asset['size']!=path.stat().st_size:raise RuntimeError('Uploaded asset mismatch; draft retained')
+    if '--draft-only' in sys.argv:
+        print('Validated draft staged; local scan of the exact downloaded asset required before publication.')
+        return
     release=api('/releases/'+str(release['id']),'PATCH',{'draft':False,'prerelease':True,'make_latest':'false'})
     print(release['html_url'])
 if __name__=='__main__':main()

@@ -48,10 +48,16 @@ jobs:
         with:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: 'false'
-      - run: python -m pip install -r desktop/requirements.txt pytest pyinstaller
+      - run: python -m pip install -r desktop/requirements.txt -r scripts/requirements-build.txt
+      - run: python -m pip_audit -r desktop/requirements.txt --strict
       - run: python -m pytest tests -q
       - run: python scripts/collect_licenses.py
       - run: python scripts/build_windows.py --client-only
+      - name: Scan exact release EXE before execution
+        shell: pwsh
+        run: |
+          Update-MpSignature -ErrorAction Stop
+          ./scripts/scan_windows_release.ps1 -File desktop/dist/CameraDeck.exe -Report desktop/dist/WINDOWS-DEFENDER-SCAN.json
       - name: Verify packaged client
         shell: pwsh
         run: |
@@ -64,7 +70,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: client-windows
-          path: desktop/dist/CameraDeck.exe
+          path: |
+            desktop/dist/CameraDeck.exe
+            desktop/dist/WINDOWS-DEFENDER-SCAN.json
   publish:
     needs: [android, windows]
     runs-on: ubuntu-latest
@@ -96,5 +104,6 @@ jobs:
           mkdir -p release/client
           cp release-input/android/app-release.apk release/client/CameraDeck-Android.apk
           cp release-input/windows/CameraDeck.exe release/client/CameraDeck-Setup.exe
+          cp release-input/windows/WINDOWS-DEFENDER-SCAN.json release/client/
           cp CLIENT_RELEASE_NOTES.md release/client/RELEASE-NOTES.md
-          python scripts/publish_client.py release/client
+          python scripts/publish_client.py release/client --draft-only

@@ -1,6 +1,8 @@
 # Camera Deck · Glass Camera
 
-Android cameras controlled from a Windows operator desk. **Glass Camera 0.12.0 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new client features remains necessary.
+Android cameras controlled from a Windows operator desk. **Glass Camera 0.12.1 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new client features remains necessary.
+
+0.12.0 was withdrawn after a Defender detection. 0.12.1 requires a hash-bound Defender report before publication; see [distribution checks and limitations](docs/WINDOWS-DISTRIBUTION-VALIDATION.ru.md). This is not a McAfee clearance or an Authenticode publisher signature.
 
 0.12 introduces a native dark camera workspace, camera filmstrip, round shutter, and ISO/exposure panels with AUTO, rulers and exact presets. See [design and validation limits](docs/GLASS-CAMERA.ru.md) and [native Windows screenshots](docs/screenshots/glass-camera/). The installed client and signed update channel stay the same.
 
