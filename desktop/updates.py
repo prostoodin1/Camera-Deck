@@ -16,8 +16,8 @@ from urllib.parse import urlparse
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-VERSION = "0.11.1"
-VERSION_CODE = 17
+VERSION = "0.11.3"
+VERSION_CODE = 19
 RELEASE_NAME = "Client"
 PRODUCT = "camera-deck-client"
 API = "https://api.github.com/repos/prostoodin1/Camera-Deck"
@@ -292,5 +292,6 @@ def _launch_updater(script: str) -> None:
     fd, script_path = tempfile.mkstemp(prefix="camera-deck-update-", suffix=".ps1")
     with os.fdopen(fd, "w", encoding="utf-8-sig") as out:
         out.write(script)
-    subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script_path],
-                     creationflags=subprocess.CREATE_NO_WINDOW)
+    from external_process import popen
+    powershell=Path(os.environ.get('SYSTEMROOT','C:/Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
+    popen([str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script_path])

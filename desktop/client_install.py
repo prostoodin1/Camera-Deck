@@ -23,8 +23,11 @@ def ensure_installed():
         except PermissionError:
             candidate.unlink(missing_ok=True)  # An existing client owns the running image.
     script="$w=New-Object -ComObject WScript.Shell; $p=Join-Path $w.SpecialFolders('Programs') 'Camera Deck'; New-Item -ItemType Directory -Path $p -Force | Out-Null; $s=$w.CreateShortcut((Join-Path $p 'Camera Deck.lnk')); $s.TargetPath="+quote(target)+"; $s.WorkingDirectory="+quote(target.parent)+"; $s.Save()"
-    subprocess.run(['powershell','-NoProfile','-NonInteractive','-Command',script],capture_output=True,timeout=15,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    subprocess.Popen([str(target)],cwd=target.parent,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    from external_process import run,popen
+    powershell=Path(os.environ.get('SYSTEMROOT','C:/Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
+    result=run([str(powershell),'-NoProfile','-NonInteractive','-Command',script],timeout=15)
+    if result.returncode:raise OSError('Не удалось создать ярлык Camera Deck: '+result.stderr.decode(errors='replace'))
+    popen([str(target)],cwd=target.parent)
     return True
 
 def acknowledge_boot():
