@@ -943,7 +943,8 @@ def main():
         assert window.grab().save(str(out/"windows-preview.png"))
         marker=out/'updater-process-started.txt';marker.unlink(missing_ok=True)
         escaped=str(marker.resolve()).replace("'","''")
-        updates._launch_updater("[System.IO.File]::WriteAllText('"+escaped+"','started')")
+        executable=str(Path(sys.executable).resolve()).replace("'","''")
+        updates._launch_updater("$ErrorActionPreference='Stop'; $null=Get-FileHash -LiteralPath '"+executable+"' -Algorithm SHA256; $null=Get-Command Get-CimInstance; $null=('{}' | ConvertFrom-Json); [System.IO.File]::WriteAllText('"+escaped+"','started')")
         deadline=time.monotonic()+20
         while time.monotonic()<deadline and not marker.is_file():app.processEvents();time.sleep(.05)
         assert marker.is_file() and marker.read_text()=='started','Packaged updater could not start; inspect update-launch.log'

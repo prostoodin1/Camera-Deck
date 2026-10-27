@@ -7,9 +7,11 @@ def test_new_instances_reset_pyinstaller_and_drop_private_path(monkeypatch,tmp_p
     bundle=tmp_path/'bundle';bundle.mkdir()
     monkeypatch.setattr(sys,'_MEIPASS',str(bundle),raising=False)
     monkeypatch.setenv('PATH',os.pathsep.join([str(bundle),str(bundle/'Qt6/bin'),'C:/Windows/System32']))
+    monkeypatch.setenv('PSModulePath','C:/wrong-powershell-version/Modules')
     env=external_process.environment()
     assert env['PYINSTALLER_RESET_ENVIRONMENT']=='1'
     assert env['PATH']=='C:/Windows/System32'
+    assert not any(name.upper()=='PSMODULEPATH' for name in env)
 
 def test_frozen_launch_clears_and_restores_dll_directory(monkeypatch):
     calls=[]

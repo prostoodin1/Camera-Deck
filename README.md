@@ -1,6 +1,6 @@
 # Camera Deck · Client
 
-Android cameras controlled from a Windows operator desk. **Client 0.11.5 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new client features remains necessary.
+Android cameras controlled from a Windows operator desk. **Client 0.11.7 is an experimental release candidate**, Android 9+ / Windows 10–11 x64. Original recording to Windows requires Android 10+ and retains a phone backup. Physical validation of the new client features remains necessary.
 
 Install CameraDeck-Setup.exe on Windows and CameraDeck-Android.apk on Android once. Subsequent signed patches replace the same installation, preserving profiles and media. Windows installs into the user profile with one Start menu shortcut. Android retains the package and certificate of Slate 0.10.0; compatibility with older 0.9 signing identities is not established. The first migration from Slate 0.10 to Client is manual because the signed manifest channel changes. See [update lifecycle, system confirmation and rollback limits](docs/CLIENT-UPDATES.ru.md) and [release notes](CLIENT_RELEASE_NOTES.md).
 

@@ -5,6 +5,9 @@ _launch_lock=threading.Lock()
 
 def environment():
     env=dict(os.environ,PYINSTALLER_RESET_ENVIRONMENT='1')
+    # PowerShell 7 paths inherited through Python break Windows PowerShell cmdlet autoload.
+    for name in list(env):
+        if name.upper()=='PSMODULEPATH':env.pop(name)
     bundle=getattr(sys,'_MEIPASS',None)
     if bundle:
         base=Path(bundle).resolve()
